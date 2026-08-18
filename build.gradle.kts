@@ -2,39 +2,17 @@ import kotlinx.kover.gradle.plugin.dsl.AggregationType
 import kotlinx.kover.gradle.plugin.dsl.CoverageUnit
 
 buildscript {
-    // The Android Gradle Plugin is put on the build classpath only when an Android SDK is
-    // actually present, so contributors without one never download or resolve it. The
-    // `android.gradle.kts` scripts in :shared and :composeApp are likewise applied lazily.
+    // The Android Gradle Plugin sits on the build classpath unconditionally, because a build
+    // script that references its types has to compile even on a machine with no Android SDK.
+    // Whether it is *applied* is still conditional (see :shared and :composeApp), so a
+    // contributor without an SDK builds desktop and web exactly as before.
     // NOTE: keep this version in sync with `agp` in gradle/libs.versions.toml.
-    val agpVersion = "8.7.3"
-
-    val androidEnabled: Boolean = run {
-        when (providers.gradleProperty("jmail.android.enabled").orNull?.trim()?.lowercase()) {
-            "true" -> true
-            "false" -> false
-            else -> {
-                val sdk = System.getenv("ANDROID_HOME")
-                    ?: System.getenv("ANDROID_SDK_ROOT")
-                    ?: rootDir.resolve("local.properties")
-                        .takeIf { it.exists() }
-                        ?.let { file ->
-                            java.util.Properties()
-                                .apply { file.inputStream().use(::load) }
-                                .getProperty("sdk.dir")
-                        }
-                sdk != null && File(sdk).isDirectory
-            }
-        }
+    repositories {
+        google()
+        mavenCentral()
     }
-
-    if (androidEnabled) {
-        repositories {
-            google()
-            mavenCentral()
-        }
-        dependencies {
-            classpath("com.android.tools.build:gradle:$agpVersion")
-        }
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.7.3")
     }
 }
 

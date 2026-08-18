@@ -20,3 +20,7 @@
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
 -dontwarn org.slf4j.**
+
+# Tink, pulled in by androidx.security.crypto for the encrypted token store, is compiled
+# against Error Prone's annotations. They are build-time only and never reach the APK.
+-dontwarn com.google.errorprone.annotations.**

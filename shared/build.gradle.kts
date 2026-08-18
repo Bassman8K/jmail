@@ -11,7 +11,25 @@ val androidEnabled = project.extra["jmail.androidEnabled"] as Boolean
 val iosEnabled = project.extra["jmail.iosEnabled"] as Boolean
 
 if (androidEnabled) {
-    apply(from = "android.gradle.kts")
+    apply(plugin = "com.android.library")
+
+    // Configured here rather than in a script applied with `apply(from = …)`: such a script
+    // is compiled against its own classpath, not the one it is applied into, so the Android
+    // Gradle Plugin's types are not visible inside it.
+    extensions.configure<com.android.build.api.dsl.LibraryExtension>("android") {
+        namespace = "com.jmail.shared"
+        compileSdk = 35
+
+        defaultConfig {
+            minSdk = 26
+            testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        }
+
+        compileOptions {
+            sourceCompatibility = JavaVersion.VERSION_17
+            targetCompatibility = JavaVersion.VERSION_17
+        }
+    }
 }
 
 kotlin {

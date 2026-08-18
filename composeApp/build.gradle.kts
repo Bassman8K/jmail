@@ -16,7 +16,84 @@ val iosEnabled = project.extra["jmail.iosEnabled"] as Boolean
 val appVersion = "1.0.0"
 
 if (androidEnabled) {
-    apply(from = "android.gradle.kts")
+    apply(plugin = "com.android.application")
+
+    // Configured here rather than in a script applied with `apply(from = …)`: such a script is
+    // compiled against its own classpath, not the one it is applied into, so the Android Gradle
+    // Plugin's types are not visible inside it.
+    //
+    // Produces:
+    //   ./gradlew :composeApp:assembleRelease   -> APK  (sideload / CI artifact)
+    //   ./gradlew :composeApp:bundleRelease     -> AAB  (Play Store upload)
+    extensions.configure<com.android.build.api.dsl.ApplicationExtension>("android") {
+        namespace = "com.jmail.app"
+        compileSdk = 35
+
+        defaultConfig {
+            applicationId = "com.jmail.app"
+            minSdk = 26
+            targetSdk = 35
+            versionCode = 1
+            versionName = "1.0.0"
+
+            // Where the app looks for the backend. Overridden per build so a debug install can
+            // point at a laptop on the LAN (10.0.2.2 is the host as seen from the emulator).
+            buildConfigField(
+                "String",
+                "JMAIL_API_URL",
+                "\"${System.getenv("JMAIL_API_URL") ?: "http://10.0.2.2:8090"}\"",
+            )
+        }
+
+        // A checked-in debug keystore is deliberately avoided; release builds are signed from
+        // environment variables so CI can publish without secrets living in the repository.
+        signingConfigs {
+            create("release") {
+                val storePath = System.getenv("JMAIL_ANDROID_KEYSTORE")
+                if (storePath != null && File(storePath).exists()) {
+                    storeFile = File(storePath)
+                    storePassword = System.getenv("JMAIL_ANDROID_KEYSTORE_PASSWORD")
+                    keyAlias = System.getenv("JMAIL_ANDROID_KEY_ALIAS")
+                    keyPassword = System.getenv("JMAIL_ANDROID_KEY_PASSWORD")
+                }
+            }
+        }
+
+        buildTypes {
+            getByName("release") {
+                isMinifyEnabled = true
+                isShrinkResources = true
+                proguardFiles(
+                    getDefaultProguardFile("proguard-android-optimize.txt"),
+                    file("proguard-rules.pro"),
+                )
+                if (System.getenv("JMAIL_ANDROID_KEYSTORE") != null) {
+                    signingConfig = signingConfigs.getByName("release")
+                }
+            }
+            getByName("debug") {
+                applicationIdSuffix = ".debug"
+                isMinifyEnabled = false
+            }
+        }
+
+        packaging {
+            resources.excludes += setOf(
+                "/META-INF/{AL2.0,LGPL2.1}",
+                "/META-INF/versions/9/previous-compilation-data.bin",
+            )
+        }
+
+        compileOptions {
+            sourceCompatibility = JavaVersion.VERSION_17
+            targetCompatibility = JavaVersion.VERSION_17
+        }
+
+        buildFeatures {
+            compose = true
+            buildConfig = true
+        }
+    }
 }
 
 kotlin {
