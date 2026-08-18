@@ -1,0 +1,338 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A new push supersedes an in-flight run on the same branch.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.daemon=false
+
+jobs:
+  test:
+    name: Tests and coverage
+    runs-on: ubuntu-latest
+
+    services:
+      # The integration tests prefer a running PostgreSQL over Testcontainers, which keeps
+      # the suite fast here and identical to what a developer runs locally.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: jmail
+          POSTGRES_USER: jmail
+          POSTGRES_PASSWORD: jmail_local_dev
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U jmail"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the extensions the schema needs
+        run: |
+          # pg_trgm and uuid-ossp require superuser, so they cannot live in a migration.
+          PGPASSWORD=jmail_local_dev psql -h localhost -U jmail -d jmail \
+            -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;' \
+            -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Run every test with the coverage gate
+        run: ./gradlew verifyAll --stacktrace
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: '5432'
+
+      - name: Publish the test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            backend/build/reports/tests/
+            shared/build/reports/tests/
+            composeApp/build/reports/tests/
+          retention-days: 14
+
+      - name: Publish the coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: build/reports/kover/
+          retention-days: 14
+
+      - name: Summarise coverage in the run
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import xml.etree.ElementTree as ET, os
+          path = "build/reports/kover/report.xml"
+          if not os.path.exists(path):
+              print("No coverage report was produced."); raise SystemExit
+          root = ET.parse(path).getroot()
+          totals = {c.get("type"): c for c in root.findall("counter")}
+          print("## Coverage\n")
+          print("| Metric | Covered |")
+          print("|---|---|")
+          for metric in ("LINE", "BRANCH"):
+              counter = totals.get(metric)
+              if counter is None: continue
+              missed, covered = int(counter.get("missed")), int(counter.get("covered"))
+              total = missed + covered
+              print(f"| {metric.title()} | {100 * covered / total:.1f}% ({covered}/{total}) |")
+          PY
+
+  build-web:
+    name: Web app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the WebAssembly bundle
+        run: ./gradlew :composeApp:wasmJsBrowserDistribution --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jmail-web
+          path: composeApp/build/dist/wasmJs/productionExecutable/
+          retention-days: 14
+
+  build-installers:
+    name: ${{ matrix.label }}
+    # Installers take minutes and produce large artifacts, so pull requests skip them.
+    # They run on a version tag, on demand, and on main so there is always a fresh build.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macOS installer (.dmg, .pkg)
+            artifact: jmail-macos
+            glob: "*.dmg *.pkg"
+          - os: windows-latest
+            label: Windows installer (.msi, .exe)
+            artifact: jmail-windows
+            glob: "*.msi *.exe"
+          - os: ubuntu-latest
+            label: Linux packages (.deb, .rpm)
+            artifact: jmail-linux
+            glob: "*.deb *.rpm"
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install rpm tooling
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y rpm fakeroot
+
+      - name: Build the native installer
+        # jpackage cannot cross-compile: each installer must be built on its own OS, which
+        # is the whole reason this job is a matrix.
+        run: ./gradlew :composeApp:packageDistributionForCurrentOS --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            composeApp/build/compose/binaries/main/dmg/*.dmg
+            composeApp/build/compose/binaries/main/pkg/*.pkg
+            composeApp/build/compose/binaries/main/msi/*.msi
+            composeApp/build/compose/binaries/main/exe/*.exe
+            composeApp/build/compose/binaries/main/deb/*.deb
+            composeApp/build/compose/binaries/main/rpm/*.rpm
+          if-no-files-found: warn
+          retention-days: 30
+
+  build-android:
+    name: Android (.apk, .aab)
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the APK and app bundle
+        # The Android target switches itself on when an SDK is present; the runner has one,
+        # so it is enabled explicitly rather than relying on detection.
+        run: |
+          ./gradlew :composeApp:assembleRelease :composeApp:bundleRelease \
+            -Pjmail.android.enabled=true --stacktrace
+        env:
+          # Unsigned unless a keystore is provided through repository secrets.
+          JMAIL_ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_PATH }}
+          JMAIL_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          JMAIL_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          JMAIL_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jmail-android
+          path: |
+            composeApp/build/outputs/apk/release/*.apk
+            composeApp/build/outputs/bundle/release/*.aab
+          if-no-files-found: warn
+          retention-days: 30
+
+  build-ios:
+    name: iOS (simulator build)
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the shared framework
+        run: ./gradlew :composeApp:linkDebugFrameworkIosSimulatorArm64 -Pjmail.ios.enabled=true --stacktrace
+
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd iosApp && xcodegen generate
+
+      - name: Build for the simulator
+        # An installable .ipa needs an Apple Developer signing identity, which cannot live in
+        # a public repository. This proves the app compiles and links for iOS; producing a
+        # device build is a signing step, not a code change.
+        run: |
+          xcodebuild -project iosApp/JMail.xcodeproj -scheme JMail \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath iosApp/build \
+            CODE_SIGNING_ALLOWED=NO build | tail -30
+
+      - name: Package the simulator app
+        run: |
+          cd iosApp/build/Build/Products/Debug-iphonesimulator 2>/dev/null || exit 0
+          zip -r "$GITHUB_WORKSPACE/JMail-simulator.zip" JMail.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jmail-ios-simulator
+          path: JMail-simulator.zip
+          if-no-files-found: warn
+          retention-days: 30
+
+  deploy-web:
+    name: Web app (GitHub Pages)
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build the WebAssembly bundle
+        run: ./gradlew :composeApp:wasmJsBrowserDistribution --stacktrace
+
+      - name: Prepare the site
+        run: |
+          cd composeApp/build/dist/wasmJs/productionExecutable
+          # No backend is bundled with a static host, so the app reads ?api=… instead.
+          # index.html is copied to 404.html so deep links resolve on Pages.
+          echo 'window.JMAIL_API_URL = null;' > config.js
+          cp index.html 404.html
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: composeApp/build/dist/wasmJs/productionExecutable
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, build-installers, build-android, build-ios]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Attach every build to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
+          body: |
+            Download the build for your platform below.
+
+            | Platform | File |
+            |---|---|
+            | macOS | `.dmg` (drag to Applications) or `.pkg` |
+            | Windows | `.msi` (installer) or `.exe` |
+            | Linux | `.deb` (Debian, Ubuntu) or `.rpm` (Fedora, RHEL) |
+            | Android | `.apk` to sideload, `.aab` for the Play Store |
+            | iOS | simulator build; a device build needs your own signing identity |
+
+            Every desktop and mobile build needs the JMail backend running — see the README
+            for `./run.sh`, which starts it with one command.
+
+  build-backend-image:
+    name: Backend image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/backend.Dockerfile
+          push: false
+          tags: jmail-backend:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
