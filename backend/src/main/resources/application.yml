@@ -1,0 +1,209 @@
+spring:
+  application:
+    name: jmail-backend
+
+  datasource:
+    url: ${JMAIL_DB_URL:jdbc:postgresql://localhost:5432/jmail}
+    username: ${JMAIL_DB_USER:jmail}
+    password: ${JMAIL_DB_PASSWORD:jmail_local_dev}
+    hikari:
+      pool-name: jmail-pool
+      maximum-pool-size: 20
+      minimum-idle: 4
+      connection-timeout: 10000
+      idle-timeout: 300000
+      max-lifetime: 900000
+      # Fail fast during development rather than blocking startup for 30s on a missing DB.
+      initialization-fail-timeout: 5000
+      # Must stay in step with hibernate.connection.provider_disables_autocommit below.
+      # Hibernate then skips the per-transaction autocommit toggle, saving a round trip on
+      # every request — but only because the pool has already turned it off here. Setting
+      # one without the other makes every commit fail.
+      auto-commit: false
+
+  jpa:
+    hibernate:
+      # Flyway owns the schema outright. Hibernate's validator is deliberately not used:
+      # it reports false mismatches for TIMESTAMPTZ and generated columns on PostgreSQL.
+      # PersistenceMappingIntegrationTest exercises real CRUD against every entity
+      # instead, which catches genuine drift that the validator would miss anyway.
+      ddl-auto: none
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 50
+          time_zone: UTC
+        order_inserts: true
+        order_updates: true
+        query:
+          in_clause_parameter_padding: true
+          fail_on_pagination_over_collection_fetch: true
+        connection:
+          provider_disables_autocommit: true
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    validate-on-migrate: true
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+      fail-on-empty-beans: false
+    deserialization:
+      fail-on-unknown-properties: false
+    default-property-inclusion: non_null
+
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 30MB
+
+  task:
+    scheduling:
+      pool:
+        size: 4
+      thread-name-prefix: jmail-sched-
+    execution:
+      pool:
+        core-size: 8
+        max-size: 32
+        queue-capacity: 200
+      thread-name-prefix: jmail-task-
+
+server:
+  port: ${JMAIL_PORT:8080}
+  shutdown: graceful
+  compression:
+    enabled: true
+    mime-types: application/json,text/html,text/plain
+    min-response-size: 2048
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /docs
+    operations-sorter: alpha
+    tags-sorter: alpha
+
+logging:
+  level:
+    root: INFO
+    com.jmail: ${JMAIL_LOG_LEVEL:INFO}
+    org.hibernate.SQL: WARN
+    org.flywaydb: INFO
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%thread] %logger{36} - %msg%n"
+
+# ---------------------------------------------------------------------------
+# JMail application configuration. Every provider block is optional: a provider with
+# no client id is simply not offered on the sign-in screen.
+# ---------------------------------------------------------------------------
+jmail:
+  base-url: ${JMAIL_BASE_URL:http://localhost:8090}
+  web-origin: ${JMAIL_WEB_ORIGIN:http://localhost:3000}
+  allowed-origins:
+    - ${JMAIL_WEB_ORIGIN:http://localhost:3000}
+    - http://localhost:8080
+    - http://localhost:3000
+
+  security:
+    # Empty in development: a random key is generated on startup, which invalidates
+    # existing sessions on restart. Must be set explicitly in production.
+    jwt-secret: ${JMAIL_JWT_SECRET:}
+    encryption-key: ${JMAIL_ENCRYPTION_KEY:}
+    access-token-ttl: PT30M
+    refresh-token-ttl: P30D
+    # Handoff codes are single-use and exchanged immediately after the OAuth redirect.
+    handoff-ttl: PT2M
+    rate-limit-per-minute: 120
+    auth-rate-limit-per-minute: 20
+
+  demo:
+    enabled: ${JMAIL_DEMO_ENABLED:false}
+    email: demo@jmail.app
+    display-name: Demo User
+
+  sync:
+    enabled: ${JMAIL_SYNC_ENABLED:true}
+    interval: PT5M
+    page-size: 100
+    max-messages-per-run: 500
+
+  providers:
+    google:
+      enabled: true
+      client-id: ${GOOGLE_CLIENT_ID:}
+      client-secret: ${GOOGLE_CLIENT_SECRET:}
+      authorization-uri: https://accounts.google.com/o/oauth2/v2/auth
+      token-uri: https://oauth2.googleapis.com/token
+      jwks-uri: https://www.googleapis.com/oauth2/v3/certs
+      issuer: https://accounts.google.com
+      scopes:
+        - openid
+        - email
+        - profile
+        - https://www.googleapis.com/auth/gmail.modify
+        - https://www.googleapis.com/auth/gmail.send
+
+    microsoft:
+      enabled: true
+      client-id: ${MICROSOFT_CLIENT_ID:}
+      client-secret: ${MICROSOFT_CLIENT_SECRET:}
+      tenant-id: ${MICROSOFT_TENANT_ID:common}
+      authorization-uri: https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize
+      token-uri: https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token
+      jwks-uri: https://login.microsoftonline.com/{tenant}/discovery/v2.0/keys
+      issuer: https://login.microsoftonline.com/{tenant}/v2.0
+      scopes:
+        - openid
+        - email
+        - profile
+        - offline_access
+        - https://graph.microsoft.com/Mail.ReadWrite
+        - https://graph.microsoft.com/Mail.Send
+        - https://graph.microsoft.com/User.Read
+
+    apple:
+      enabled: true
+      client-id: ${APPLE_CLIENT_ID:}
+      team-id: ${APPLE_TEAM_ID:}
+      key-id: ${APPLE_KEY_ID:}
+      private-key: ${APPLE_PRIVATE_KEY:}
+      authorization-uri: https://appleid.apple.com/auth/authorize
+      token-uri: https://appleid.apple.com/auth/token
+      jwks-uri: https://appleid.apple.com/auth/keys
+      issuer: https://appleid.apple.com
+      scopes:
+        - name
+        - email
+
+  exchange:
+    enabled: true
+    default-host: ${EXCHANGE_DEFAULT_HOST:}
+    default-imap-port: ${EXCHANGE_DEFAULT_IMAP_PORT:993}
+    default-smtp-port: ${EXCHANGE_DEFAULT_SMTP_PORT:587}
+    connect-timeout: PT10S
+    read-timeout: PT30S

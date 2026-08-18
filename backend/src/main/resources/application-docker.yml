@@ -1,0 +1,12 @@
+# Profile used when the backend runs inside docker/compose.yml.
+jmail:
+  base-url: ${JMAIL_BASE_URL:http://localhost:8090}
+  allowed-origins:
+    - ${JMAIL_WEB_ORIGIN:http://localhost:3000}
+    - http://localhost
+    - http://web
+
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 30

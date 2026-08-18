@@ -1,0 +1,70 @@
+# XcodeGen specification for the iOS app.
+#
+# The Xcode project is generated rather than committed. A .pbxproj is a 1,000-line
+# machine-managed file that conflicts on every branch and cannot be reviewed meaningfully;
+# this file says the same thing in a form a person can read and a diff can show.
+#
+# Generate it with:  ./scripts/build-ios.sh generate     (installs xcodegen if needed)
+# Then open:         iosApp/JMail.xcodeproj
+
+name: JMail
+options:
+  bundleIdPrefix: com.jmail
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO # the Gradle build phase writes outside the sandbox
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  JMail:
+    type: application
+    platform: iOS
+
+    sources:
+      - path: iosApp
+        excludes:
+          - "**/.DS_Store"
+
+    info:
+      path: iosApp/Info.plist
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jmail.app
+        PRODUCT_NAME: JMail
+        INFOPLIST_FILE: iosApp/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2" # iPhone and iPad
+        # The Kotlin framework is produced by the Gradle build phase below.
+        FRAMEWORK_SEARCH_PATHS:
+          - $(inherited)
+          - $(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)
+        OTHER_LDFLAGS:
+          - $(inherited)
+          - -framework
+          - JMailApp
+        LD_RUNPATH_SEARCH_PATHS:
+          - $(inherited)
+          - "@executable_path/Frameworks"
+      configs:
+        Debug:
+          JMAIL_API_URL: http://localhost:8090
+        Release:
+          # Point this at your deployed backend before archiving for TestFlight.
+          JMAIL_API_URL: https://api.jmail.app
+
+    preBuildScripts:
+      - name: Build Kotlin framework
+        # Compiles :composeApp for the active architecture and copies the framework where
+        # FRAMEWORK_SEARCH_PATHS above expects it.
+        script: |
+          cd "$SRCROOT/.."
+          ./gradlew :composeApp:embedAndSignAppleFrameworkForXcode
+        basedOnDependencyAnalysis: false

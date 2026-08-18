@@ -1,0 +1,43 @@
+# Build output
+build/
+*/build/
+buildSrc/build/
+.gradle/
+.kotlin/
+out/
+dist/
+
+# Local configuration and secrets
+.env
+local.properties
+*.p8
+*.keystore
+*.jks
+
+# IDE
+.idea/
+*.iml
+.fleet/
+.vscode/
+*.hprof
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (Kotlin/Wasm toolchain)
+node_modules/
+kotlin-js-store/
+
+# Xcode
+iosApp/build/
+iosApp/DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# Reports
+**/build/reports/
+
+.claude/
+
+*.log

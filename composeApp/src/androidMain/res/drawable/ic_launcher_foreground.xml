@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The JMail mark as a vector, so the launcher icon is generated at every density without
+  shipping a single PNG. Geometry matches JMailIconRenderer in buildSrc, which draws the
+  same envelope for the desktop installers.
+
+  Adaptive icons reserve the outer third for masking, so the artwork is drawn inside the
+  central 72x72 safe zone of the 108x108 canvas.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Envelope body -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M32,44 L76,44 A2,2 0 0 1 78,46 L78,70 A2,2 0 0 1 76,72 L32,72 A2,2 0 0 1 30,70 L30,46 A2,2 0 0 1 32,44 Z" />
+
+    <!-- Folded flap -->
+    <path
+        android:fillColor="#E0E7FF"
+        android:strokeColor="#4F46E5"
+        android:strokeWidth="2.5"
+        android:strokeLineJoin="round"
+        android:pathData="M30,45 L54,62 L78,45 Z" />
+
+    <!-- Unread accent -->
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M72,36 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
+</vector>

@@ -1,0 +1,19 @@
+# Profile used by `./run.sh` for local development.
+jmail:
+  demo:
+    enabled: true
+
+logging:
+  level:
+    com.jmail: DEBUG
+
+spring:
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
+  # Local IMAP/SMTP server from docker/compose.yml, offered as a one-click account
+  # on the sign-in screen so the Exchange/IMAP path can be exercised offline.
+  mail:
+    host: localhost
+    port: 3025

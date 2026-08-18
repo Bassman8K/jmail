@@ -1,0 +1,43 @@
+# Test profile. The datasource URL is supplied by Testcontainers at runtime
+# (see AbstractIntegrationTest); everything here is deterministic on purpose.
+spring:
+  flyway:
+    clean-disabled: false
+  jpa:
+    hibernate:
+      ddl-auto: none
+
+jmail:
+  base-url: http://localhost:8080
+  web-origin: http://localhost:3000
+  security:
+    # Fixed key so tokens minted in one test can be verified in another.
+    jwt-secret: test-secret-key-that-is-long-enough-for-hmac-sha256-usage!!
+    encryption-key: 0123456789abcdef0123456789abcdef
+    access-token-ttl: PT30M
+    refresh-token-ttl: P7D
+    handoff-ttl: PT2M
+    # Tests hammer the sign-in endpoints far harder than any real client would.
+    rate-limit-per-minute: 100000
+    auth-rate-limit-per-minute: 100000
+  demo:
+    enabled: true
+  sync:
+    enabled: false
+  providers:
+    google:
+      client-id: test-google-client
+      client-secret: test-google-secret
+    microsoft:
+      client-id: test-microsoft-client
+      client-secret: test-microsoft-secret
+      tenant-id: common
+    apple:
+      client-id: com.jmail.test
+      team-id: TEAMID1234
+      key-id: KEYID12345
+
+logging:
+  level:
+    com.jmail: DEBUG
+    org.springframework.web: WARN
