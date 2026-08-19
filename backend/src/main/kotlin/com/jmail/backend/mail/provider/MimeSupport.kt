@@ -116,8 +116,17 @@ object MimeBuilder {
             output.toByteArray()
         }
 
-    fun toMimeMessage(account: MailAccount, outgoing: OutgoingMessage): MimeMessage {
-        val session = Session.getInstance(Properties())
+    /**
+     * @param session the session the message is built against. It matters: `Transport.send`
+     * resolves the transport from the *message's* session, so building against a default
+     * one sends to localhost:25 no matter what the account says. Callers that only need the
+     * bytes (Gmail's API, which posts raw RFC 822) can leave it defaulted.
+     */
+    fun toMimeMessage(
+        account: MailAccount,
+        outgoing: OutgoingMessage,
+        session: Session = Session.getInstance(Properties()),
+    ): MimeMessage {
         val message = MimeMessage(session)
 
         message.setFrom(InternetAddress(account.email, account.displayName, CHARSET))

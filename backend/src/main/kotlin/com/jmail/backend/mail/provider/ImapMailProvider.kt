@@ -117,17 +117,25 @@ class ImapMailProvider(
         }
 
         val session = Session.getInstance(sessionProperties)
-        val mimeMessage = MimeBuilder.toMimeMessage(account, message)
+        session.debug = false // keep credentials out of stdout even if a caller enables debug
+
+        // Built against *this* session, not a default one: Transport resolves the protocol
+        // and host from the session the message belongs to, so a message built elsewhere is
+        // sent to localhost:25 whatever the account is configured with.
+        val mimeMessage = MimeBuilder.toMimeMessage(account, message, session)
 
         return runCatching {
-            Transport.send(mimeMessage, account.username ?: account.email, password)
+            session.getTransport("smtp").use { transport ->
+                transport.connect(host, port, account.username ?: account.email, password)
+                transport.sendMessage(mimeMessage, mimeMessage.allRecipients)
+            }
             mimeMessage.messageID ?: "smtp-${Instant.now().toEpochMilli()}"
         }.getOrElse { failure ->
             if (failure is AuthenticationFailedException) {
                 throw ReauthenticationRequiredException(provider.displayName)
             }
             throw ProviderException(provider.displayName, "The message could not be sent: ${failure.message}", failure)
-        }.also { session.debug = false } // keep credentials out of stdout even if a caller enables debug
+        }
     }
 
     override fun applyFlags(account: MailAccount, remoteMessageId: String, flags: FlagUpdate) {
@@ -245,15 +253,23 @@ class ImapMailProvider(
             val disposition = current.disposition
             val filename = runCatching { current.fileName }.getOrNull()
 
+            val isInline = Part.INLINE.equals(disposition, ignoreCase = true)
+            val isAttachment = Part.ATTACHMENT.equals(disposition, ignoreCase = true)
+
             when {
-                filename != null && (disposition == null || !Part.INLINE.equals(disposition, ignoreCase = true)) ||
-                    Part.ATTACHMENT.equals(disposition, ignoreCase = true) -> {
+                // Anything with a filename, or explicitly dispositioned as an attachment, is
+                // something the reader offers. Inline parts count: an embedded image is
+                // referenced by the HTML through cid: and has to be fetchable, which is what
+                // `isInline` distinguishes. (Written as one && || chain this read as
+                // "named and not inline, or attachment", which quietly dropped every
+                // inline part and left `isInline` permanently false.)
+                isAttachment || filename != null -> {
                     attachments += RemoteAttachment(
-                        remoteId = filename,
+                        remoteId = filename ?: "attachment-${attachments.size}",
                         filename = filename ?: "attachment",
                         mimeType = current.contentType?.substringBefore(';')?.trim() ?: "application/octet-stream",
                         sizeBytes = current.size.coerceAtLeast(0).toLong(),
-                        isInline = Part.INLINE.equals(disposition, ignoreCase = true),
+                        isInline = isInline,
                     )
                 }
 
