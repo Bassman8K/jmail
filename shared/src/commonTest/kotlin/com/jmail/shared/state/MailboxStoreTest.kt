@@ -137,16 +137,29 @@ class MailboxStoreTest {
     }
 
     @Test
-    fun starring_toggles_and_rolls_back_when_the_server_refuses() = runTest {
+    fun starring_shows_immediately_rather_than_waiting_for_the_server() = runTest {
+        // The request succeeds here, so nothing can roll the star back underneath the
+        // assertion. Checking the optimistic update against a *failing* request races the
+        // rollback: both run, and on a loaded machine the rollback wins.
+        val store = store(defaultRoutes + okAction)
+        store.start()
+        awaitUntil { store.state.value.messages.size == 3 }
+
+        store.toggleStar(store.state.value.messages.first())
+
+        assertTrue(store.state.value.messages.first().isStarred)
+    }
+
+    @Test
+    fun a_refused_star_rolls_back_and_reports_the_failure() = runTest {
         val store = store(defaultRoutes + failingAction)
         store.start()
         awaitUntil { store.state.value.messages.size == 3 }
 
         store.toggleStar(store.state.value.messages.first())
-        assertTrue(store.state.value.messages.first().isStarred)
 
         awaitUntil(describe = { "the star to roll back" }) {
-            !store.state.value.messages.first().isStarred
+            !store.state.value.messages.first().isStarred && store.state.value.error != null
         }
     }
 
