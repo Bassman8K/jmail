@@ -94,6 +94,22 @@ kotlin {
         }
 
         if (androidEnabled) {
+            // Robolectric so the Android session store is exercised on the JVM. The
+            // interesting path is the one where the hardware keystore is unavailable — a
+            // real failure mode on some manufacturer ROMs — and the store must degrade to
+            // in-memory rather than falling back to plaintext on disk.
+            val androidUnitTest by getting {
+                dependencies {
+                    implementation(kotlin("test"))
+                    implementation(libs.robolectric)
+                    implementation(libs.androidx.test.junit)
+                    // Robolectric drives tests through JUnit 4, and this build runs every
+                    // Test task on the JUnit Platform; without the vintage engine the
+                    // runner is simply never discovered and the task reports no tests.
+                    runtimeOnly(libs.junit.vintage.engine)
+                }
+            }
+
             val androidMain by getting {
                 dependencies {
                     implementation(libs.ktor.client.okhttp)
