@@ -3,6 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+    # Several jobs gate on `refs/tags/v*`, and the release job only runs there --
+    # without this the tag push produced no run at all.
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
