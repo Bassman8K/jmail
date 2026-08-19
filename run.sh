@@ -277,20 +277,21 @@ command_docker() {
   docker info >/dev/null 2>&1 || die "Docker is installed but not running. Start Docker Desktop, then run this again."
   ensure_env_file
 
-  local image="${JMAIL_BACKEND_IMAGE:-ghcr.io/bassman8k/jmail-backend:latest}"
+  local backend_image="${JMAIL_BACKEND_IMAGE:-ghcr.io/bassman8k/jmail-backend:latest}"
+  local web_image="${JMAIL_WEB_IMAGE:-ghcr.io/bassman8k/jmail-web:latest}"
+  export JMAIL_BACKEND_IMAGE="$backend_image" JMAIL_WEB_IMAGE="$web_image"
 
-  step "Pulling $image"
-  if ! JMAIL_BACKEND_IMAGE="$image" docker compose -f "$COMPOSE_FILE" --env-file .env \
-      --profile full pull backend 2>&1 | tail -3; then
-    warn "Could not pull the published image; building it from source instead."
-    JMAIL_BACKEND_IMAGE="" docker compose -f "$COMPOSE_FILE" --env-file .env \
-      --profile full up -d --build
-  else
+  step "Pulling $backend_image"
+  step "Pulling $web_image"
+  if docker compose -f "$COMPOSE_FILE" --env-file .env --profile full pull backend web 2>&1 | tail -3; then
     step "Starting the stack"
-    # --no-build is what makes Compose use the pulled image: a service declaring both
+    # --no-build is what makes Compose use the pulled images: a service declaring both
     # `image` and `build` is otherwise built and tagged locally, never pulled.
-    JMAIL_BACKEND_IMAGE="$image" docker compose -f "$COMPOSE_FILE" --env-file .env \
-      --profile full up -d --no-build
+    docker compose -f "$COMPOSE_FILE" --env-file .env --profile full up -d --no-build
+  else
+    warn "Could not pull the published images; building from source instead."
+    unset JMAIL_BACKEND_IMAGE JMAIL_WEB_IMAGE
+    docker compose -f "$COMPOSE_FILE" --env-file .env --profile full up -d --build
   fi
 
   local backend_port web_port

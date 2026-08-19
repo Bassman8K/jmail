@@ -9,6 +9,9 @@ import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
+import org.springframework.web.HttpMediaTypeNotAcceptableException
+import org.springframework.web.HttpMediaTypeNotSupportedException
+import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.security.access.AccessDeniedException
 import org.springframework.security.core.AuthenticationException
 import org.springframework.web.bind.MethodArgumentNotValidException
@@ -166,6 +169,57 @@ class GlobalExceptionHandler {
             path = request.requestURI,
         ),
     )
+
+    /**
+     * A wrong method, an unreadable Content-Type or an unacceptable Accept header are all
+     * client mistakes with a status of their own. Without this they fell through to the
+     * catch-all below and came back as 500 — telling the caller the server was broken when
+     * the request was, and logging a stack trace at ERROR for every one of them.
+     */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException::class)
+    fun handleMethodNotSupported(
+        exception: HttpRequestMethodNotSupportedException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> = ResponseEntity
+        .status(HttpStatus.METHOD_NOT_ALLOWED)
+        .apply { exception.supportedHttpMethods?.let { allowed -> allow(*allowed.toTypedArray()) } }
+        .body(
+            ApiErrorResponse(
+                code = "method_not_allowed",
+                message = "${exception.method} is not supported here" +
+                    (exception.supportedMethods?.takeIf { it.isNotEmpty() }
+                        ?.joinToString(prefix = ". Use ", separator = " or ") ?: ""),
+                path = request.requestURI,
+            ),
+        )
+
+    @ExceptionHandler(HttpMediaTypeNotSupportedException::class)
+    fun handleUnsupportedMediaType(
+        exception: HttpMediaTypeNotSupportedException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> = ResponseEntity
+        .status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+        .body(
+            ApiErrorResponse(
+                code = "unsupported_media_type",
+                message = "This endpoint accepts application/json",
+                path = request.requestURI,
+            ),
+        )
+
+    @ExceptionHandler(HttpMediaTypeNotAcceptableException::class)
+    fun handleNotAcceptable(
+        exception: HttpMediaTypeNotAcceptableException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> = ResponseEntity
+        .status(HttpStatus.NOT_ACCEPTABLE)
+        .body(
+            ApiErrorResponse(
+                code = "not_acceptable",
+                message = "This endpoint can only return application/json",
+                path = request.requestURI,
+            ),
+        )
 
     @ExceptionHandler(NoHandlerFoundException::class)
     fun handleNoHandler(

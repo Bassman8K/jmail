@@ -16,7 +16,9 @@ import org.springframework.core.MethodParameter
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.dao.OptimisticLockingFailureException
 import org.springframework.http.HttpInputMessage
+import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.mock.web.MockHttpServletRequest
@@ -25,6 +27,9 @@ import org.springframework.security.authentication.BadCredentialsException
 import org.springframework.validation.BeanPropertyBindingResult
 import org.springframework.validation.FieldError
 import org.springframework.web.bind.MethodArgumentNotValidException
+import org.springframework.web.HttpMediaTypeNotAcceptableException
+import org.springframework.web.HttpMediaTypeNotSupportedException
+import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.servlet.NoHandlerFoundException
 
@@ -197,6 +202,62 @@ class GlobalExceptionHandlerTest {
         assertThat(response.statusCode).isEqualTo(HttpStatus.CONFLICT)
         assertThat(response.error().code).isEqualTo("concurrent_modification")
         assertThat(response.error().message).contains("Reload and try again")
+    }
+
+    // ---- wrong method, wrong media type -------------------------------------------
+
+    @Test
+    fun `a wrong method is 405 and says which methods do work`() {
+        // Found in the running app: GET on a POST-only route came back as a 500 saying the
+        // server had broken, and logged a stack trace for what is an ordinary client error.
+        val response = handler.handleMethodNotSupported(
+            HttpRequestMethodNotSupportedException("GET", listOf("POST", "PUT")),
+            request,
+        )
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED)
+        assertThat(response.error().code).isEqualTo("method_not_allowed")
+        assertThat(response.error().message).contains("GET")
+        assertThat(response.error().message).contains("POST")
+        // RFC 9110 requires Allow on a 405, and it is what lets a client correct itself.
+        assertThat(response.headers.allow).isEqualTo(setOf(HttpMethod.POST, HttpMethod.PUT))
+    }
+
+    @Test
+    fun `a wrong method with no alternatives still answers 405 rather than 500`() {
+        val response = handler.handleMethodNotSupported(
+            HttpRequestMethodNotSupportedException("TRACE"),
+            request,
+        )
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED)
+        assertThat(response.error().code).isEqualTo("method_not_allowed")
+        assertThat(response.error().message).isEqualTo("TRACE is not supported here")
+    }
+
+    @Test
+    fun `an unsupported content type is 415`() {
+        val response = handler.handleUnsupportedMediaType(
+            HttpMediaTypeNotSupportedException(
+                MediaType.TEXT_XML,
+                listOf(MediaType.APPLICATION_JSON),
+            ),
+            request,
+        )
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+        assertThat(response.error().code).isEqualTo("unsupported_media_type")
+    }
+
+    @Test
+    fun `an unacceptable Accept header is 406`() {
+        val response = handler.handleNotAcceptable(
+            HttpMediaTypeNotAcceptableException(listOf(MediaType.APPLICATION_JSON)),
+            request,
+        )
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.NOT_ACCEPTABLE)
+        assertThat(response.error().code).isEqualTo("not_acceptable")
     }
 
     // ---- routing and the catch-all ------------------------------------------------
