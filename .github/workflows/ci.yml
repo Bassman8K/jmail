@@ -156,7 +156,16 @@ jobs:
 
       - name: Install rpm tooling
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y rpm fakeroot
+        # Both variables matter on the Ubuntu 24.04 image: without them apt can stop on a
+        # dpkg config prompt or on needrestart's service-restart menu and hang until the
+        # job's six-hour ceiling. The timeout turns any remaining stall into a fast failure.
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          NEEDRESTART_MODE: a
+        timeout-minutes: 5
+        run: |
+          sudo -E apt-get update -qq
+          sudo -E apt-get install -y -qq --no-install-recommends rpm fakeroot
 
       - name: Build the native installer
         # jpackage cannot cross-compile: each installer must be built on its own OS, which
