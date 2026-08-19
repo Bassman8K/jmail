@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1.7
 
 # ---- build stage: compile the Compose Multiplatform app to WebAssembly ------
-FROM eclipse-temurin:17-jdk AS build
+# `--platform=$BUILDPLATFORM` pins this stage to the machine doing the building. Its
+# output is architecture-independent, so a multi-arch build compiles it once natively
+# instead of running Gradle under QEMU emulation for every target.
+FROM --platform=$BUILDPLATFORM eclipse-temurin:17-jdk AS build
 WORKDIR /src
 
 COPY gradlew settings.gradle.kts build.gradle.kts gradle.properties LICENSE ./

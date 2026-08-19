@@ -257,10 +257,11 @@ jobs:
         # cleanly and only fails on the user's phone.
         run: |
           apk=composeApp/build/outputs/jmail/JMail-1.0.0.apk
-          "$ANDROID_HOME"/build-tools/*/apksigner verify --verbose --print-certs "$apk"
-          # `verify` alone exits 0 on an unsigned APK in some tool versions.
-          "$ANDROID_HOME"/build-tools/*/apksigner verify "$apk" \
-            || { echo "::error::the APK is not signed"; exit 1; }
+          # The runner ships several build-tools versions, so the glob has to be resolved to
+          # one path -- passing all of them makes apksigner read the second as a subcommand.
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --verbose --print-certs "$apk"
+          "$apksigner" verify "$apk" || { echo "::error::the APK is not signed"; exit 1; }
 
       - name: Delete the keystore
         if: always()
@@ -424,9 +425,19 @@ jobs:
             Every desktop and mobile build needs the JMail backend running — see the README
             for `./run.sh`, which starts it with one command.
 
-  build-backend-image:
-    name: Backend image
+  build-images:
+    name: ${{ matrix.label }} image
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Backend
+            image: jmail-backend
+            dockerfile: docker/backend.Dockerfile
+          - label: Web
+            image: jmail-web
+            dockerfile: docker/web.Dockerfile
     permissions:
       contents: read
       packages: write
@@ -448,7 +459,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/jmail-backend
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
           # `edge` tracks main; a version tag also moves `latest`, which is what
           # docker/compose.yml pulls by default.
           tags: |
@@ -458,15 +469,15 @@ jobs:
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=sha,enable=${{ github.event_name == 'pull_request' }}
 
-      - name: Build the backend image
+      - name: Build the image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: docker/backend.Dockerfile
+          file: ${{ matrix.dockerfile }}
           push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
           # linux/arm64 as well, so an Apple Silicon machine does not emulate the backend.
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

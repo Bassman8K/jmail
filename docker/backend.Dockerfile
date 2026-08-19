@@ -3,10 +3,14 @@
 # ---- build stage -----------------------------------------------------------
 # The Gradle cache is mounted rather than copied so repeat builds do not re-download
 # the dependency graph.
-FROM eclipse-temurin:17-jdk-alpine AS build
+# Noble rather than Alpine: temurin's Alpine tags are published for linux/amd64 only, and
+# this image is built for arm64 too so Apple Silicon does not run the backend under emulation.
+#
+# `--platform=$BUILDPLATFORM` pins this stage to the machine doing the building. Its
+# output is architecture-independent, so a multi-arch build compiles it once natively
+# instead of running Gradle under QEMU emulation for every target.
+FROM --platform=$BUILDPLATFORM eclipse-temurin:17-jdk-noble AS build
 WORKDIR /src
-
-RUN apk add --no-cache bash
 
 COPY gradlew settings.gradle.kts build.gradle.kts gradle.properties LICENSE ./
 COPY gradle gradle
@@ -19,11 +23,14 @@ RUN --mount=type=cache,target=/root/.gradle \
       :backend:bootJar
 
 # ---- runtime stage ---------------------------------------------------------
-FROM eclipse-temurin:17-jre-alpine AS runtime
+FROM eclipse-temurin:17-jre-noble AS runtime
 WORKDIR /app
 
-RUN apk add --no-cache wget curl tzdata && \
-    addgroup -S jmail && adduser -S jmail -G jmail
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends wget curl tzdata \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --system jmail \
+ && useradd --system --gid jmail --no-create-home --shell /usr/sbin/nologin jmail
 
 COPY --from=build --chown=jmail:jmail /src/backend/build/libs/jmail-backend.jar app.jar
 

@@ -112,6 +112,9 @@ services:
 
   web:
     profiles: ["full"]
+    # As with the backend: `image` names the locally built result, and `./run.sh docker`
+    # overrides it with the published one and passes --no-build.
+    image: ${JMAIL_WEB_IMAGE:-jmail-web:local}
     build:
       context: ..
       dockerfile: docker/web.Dockerfile
