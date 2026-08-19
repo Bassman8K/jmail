@@ -200,10 +200,3 @@ jmail:
         - name
         - email
 
-  exchange:
-    enabled: true
-    default-host: ${EXCHANGE_DEFAULT_HOST:}
-    default-imap-port: ${EXCHANGE_DEFAULT_IMAP_PORT:993}
-    default-smtp-port: ${EXCHANGE_DEFAULT_SMTP_PORT:587}
-    connect-timeout: PT10S
-    read-timeout: PT30S

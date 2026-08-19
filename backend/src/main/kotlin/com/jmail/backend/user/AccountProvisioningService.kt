@@ -1,7 +1,6 @@
 package com.jmail.backend.user
 
 import com.jmail.backend.auth.CredentialCipher
-import com.jmail.backend.auth.ExchangeCredentials
 import com.jmail.backend.auth.oauth.OAuthTokens
 import com.jmail.backend.auth.oauth.ProviderProfile
 import com.jmail.backend.common.EmailAddresses
@@ -72,54 +71,6 @@ class AccountProvisioningService(
         account.refreshToken = tokens.refreshToken?.let(credentialCipher::encrypt) ?: account.refreshToken
         account.tokenExpiresAt = tokens.expiresAt(now)
         account.scopes = tokens.scope ?: account.scopes
-        account.status = AccountStatus.CONNECTED
-        account.statusDetail = null
-        account.updatedAt = now
-
-        mailAccountRepository.save(account)
-        touchLogin(user, now)
-
-        log.info("Linked {} mailbox for user {}", provider, user.id)
-        return user
-    }
-
-    @Transactional
-    fun completeCredentialSignIn(
-        provider: AccountProvider,
-        credentials: ExchangeCredentials,
-        linkToUserId: UUID? = null,
-    ): UserAccount {
-        val now = Instant.now()
-        val email = EmailAddresses.canonical(credentials.email)
-        val displayName = credentials.displayName?.takeIf { it.isNotBlank() } ?: email.substringBefore('@')
-
-        val user = linkToUserId
-            ?.let { id -> userRepository.findById(id).orElse(null) }
-            ?: findOrCreateUser(email, displayName, null, now)
-
-        val existing = mailAccountRepository.findByUserIdAndProviderAndProviderAccountId(
-            userId = user.id,
-            provider = provider,
-            providerAccountId = email,
-        )
-
-        val account = existing ?: MailAccount(
-            userId = user.id,
-            provider = provider,
-            providerAccountId = email,
-            isPrimary = mailAccountRepository.countByUserId(user.id) == 0L,
-            color = colorFor(mailAccountRepository.countByUserId(user.id).toInt()),
-        )
-
-        account.email = email
-        account.displayName = displayName
-        account.username = credentials.username
-        account.passwordSecret = credentialCipher.encrypt(credentials.password)
-        account.imapHost = credentials.imapHost
-        account.imapPort = credentials.imapPort
-        account.smtpHost = credentials.smtpHost
-        account.smtpPort = credentials.smtpPort
-        account.useTls = credentials.useTls
         account.status = AccountStatus.CONNECTED
         account.statusDetail = null
         account.updatedAt = now

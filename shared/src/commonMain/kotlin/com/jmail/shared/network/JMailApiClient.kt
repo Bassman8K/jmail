@@ -7,12 +7,9 @@ import com.jmail.shared.model.BulkActionResult
 import com.jmail.shared.model.Category
 import com.jmail.shared.model.ComposeRequest
 import com.jmail.shared.model.CreateCategoryRequest
-import com.jmail.shared.model.ExchangeSignInRequest
-import com.jmail.shared.model.ExchangeSuggestion
 import com.jmail.shared.model.HandoffExchangeRequest
 import com.jmail.shared.model.LogoutRequest
 import com.jmail.shared.model.MailFolder
-import com.jmail.shared.model.MailProviderOption
 import com.jmail.shared.model.MailThread
 import com.jmail.shared.model.MailboxCounts
 import com.jmail.shared.model.MessageActionRequest
@@ -98,19 +95,6 @@ class JMailApiClient(
         callFor<AuthTokens>(authenticated = false) {
             client.post("$baseUrl/api/v1/auth/exchange") { jsonBody(HandoffExchangeRequest(code)) }
         }.onSuccess(::storeTokens)
-
-    suspend fun signInWithExchangeServer(request: ExchangeSignInRequest): ApiResult<AuthTokens> =
-        callFor<AuthTokens>(authenticated = false) {
-            client.post("$baseUrl/api/v1/auth/exchange-server/sign-in") { jsonBody(request) }
-        }.onSuccess(::storeTokens)
-
-    suspend fun suggestExchangeSettings(email: String): ApiResult<ExchangeSuggestion> =
-        callFor(authenticated = false) {
-            client.get("$baseUrl/api/v1/auth/exchange-server/suggest?email=$email")
-        }
-
-    suspend fun mailProviders(): ApiResult<List<MailProviderOption>> =
-        callFor(authenticated = false) { client.get("$baseUrl/api/v1/auth/mail-providers") }
 
     suspend fun signInAsDemo(): ApiResult<AuthTokens> =
         callFor<AuthTokens>(authenticated = false) { client.post("$baseUrl/api/v1/auth/demo") }

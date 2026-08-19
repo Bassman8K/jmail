@@ -42,19 +42,9 @@ class SignInStoreTest {
     @AfterTest
     fun tearDown() = scope.cancel()
 
-    private val mailProvidersJson = """
-        [{"id":"gmail","displayName":"Gmail","imapHost":"imap.gmail.com","imapPort":993,
-          "smtpHost":"smtp.gmail.com","smtpPort":587,"useTls":true,"requiresAppPassword":true,
-          "appPasswordUrl":"https://myaccount.google.com/apppasswords",
-          "helpText":"Gmail needs a 16-character app password.","requiresManualServer":false},
-         {"id":"other","displayName":"Other (IMAP)","imapHost":"","imapPort":993,
-          "smtpHost":"","smtpPort":587,"useTls":true,"requiresAppPassword":false,
-          "appPasswordUrl":null,"helpText":null,"requiresManualServer":true}]
-    """.trimIndent()
-
     private val providersJson = """
         [{"id":"GOOGLE","displayName":"Continue with Google","kind":"OAUTH","icon":"google"},
-         {"id":"EXCHANGE","displayName":"Microsoft Exchange or IMAP","kind":"CREDENTIALS","icon":"exchange"},
+         {"id":"MICROSOFT","displayName":"Continue with Microsoft","kind":"OAUTH","icon":"microsoft"},
          {"id":"DEMO","displayName":"Explore the demo mailbox","kind":"DEMO","icon":"demo"}]
     """.trimIndent()
 
@@ -109,114 +99,6 @@ class SignInStoreTest {
 
         assertEquals("https://accounts.google.com/o/oauth2/v2/auth?x=1", openedUrls.single())
         assertEquals(SignInStep.AWAITING_PROVIDER, store.state.value.step)
-    }
-
-    @Test
-    fun choosing_to_use_an_email_address_opens_the_service_picker() = runTest {
-        val store = store()
-        store.start()
-        awaitUntil { store.state.value.providers.isNotEmpty() }
-
-        store.chooseProvider(
-            ProviderSummary(AccountProvider.EXCHANGE, "Exchange", SignInKind.CREDENTIALS, "exchange"),
-        )
-
-        // Naming the service first is what lets the form be two fields instead of six.
-        assertEquals(SignInStep.CHOOSE_MAIL_SERVICE, store.state.value.step)
-        assertTrue(openedUrls.isEmpty())
-    }
-
-    @Test
-    fun the_service_list_is_loaded_alongside_the_sign_in_options() = runTest {
-        val store = store(
-            mapOf(
-                "/auth/providers" to (providersJson to HttpStatusCode.OK),
-                "/auth/mail-providers" to (mailProvidersJson to HttpStatusCode.OK),
-            ),
-        )
-
-        store.start()
-        awaitUntil(describe = { "the mail service list" }) { store.state.value.mailProviders.isNotEmpty() }
-
-        assertEquals(2, store.state.value.mailProviders.size)
-    }
-
-    @Test
-    fun picking_a_service_fills_in_its_servers_and_warns_about_app_passwords() = runTest {
-        val store = store(
-            mapOf(
-                "/auth/providers" to (providersJson to HttpStatusCode.OK),
-                "/auth/mail-providers" to (mailProvidersJson to HttpStatusCode.OK),
-            ),
-        )
-        store.start()
-        awaitUntil { store.state.value.mailProviders.isNotEmpty() }
-
-        val gmail = store.state.value.mailProviders.first { it.id == "gmail" }
-        store.selectMailProvider(gmail)
-
-        val state = store.state.value
-        assertEquals(SignInStep.EXCHANGE_CREDENTIALS, state.step)
-        assertEquals("imap.gmail.com", state.imapHost)
-        assertEquals("smtp.gmail.com", state.smtpHost)
-        assertEquals("993", state.imapPort)
-        assertTrue(state.requiresAppPassword)
-        assertEquals("Gmail", state.mailServiceName)
-        // Nothing to type, so the server fields stay out of the way.
-        assertFalse(state.showAdvanced)
-    }
-
-    @Test
-    fun picking_a_self_hosted_server_opens_the_fields_straight_away() = runTest {
-        val store = store(
-            mapOf(
-                "/auth/providers" to (providersJson to HttpStatusCode.OK),
-                "/auth/mail-providers" to (mailProvidersJson to HttpStatusCode.OK),
-            ),
-        )
-        store.start()
-        awaitUntil { store.state.value.mailProviders.isNotEmpty() }
-
-        store.selectMailProvider(store.state.value.mailProviders.first { it.id == "other" })
-
-        assertTrue(store.state.value.showAdvanced, "there is nothing to pre-fill, so ask")
-        assertFalse(store.state.value.requiresAppPassword)
-    }
-
-    @Test
-    fun the_app_password_page_can_be_opened_from_the_form() = runTest {
-        val store = store(
-            mapOf(
-                "/auth/providers" to (providersJson to HttpStatusCode.OK),
-                "/auth/mail-providers" to (mailProvidersJson to HttpStatusCode.OK),
-            ),
-        )
-        store.start()
-        awaitUntil { store.state.value.mailProviders.isNotEmpty() }
-        store.selectMailProvider(store.state.value.mailProviders.first { it.id == "gmail" })
-
-        store.openAppPasswordPage()
-
-        assertEquals("https://myaccount.google.com/apppasswords", openedUrls.single())
-    }
-
-    @Test
-    fun going_back_from_the_form_returns_to_the_service_list() = runTest {
-        val store = store(
-            mapOf(
-                "/auth/providers" to (providersJson to HttpStatusCode.OK),
-                "/auth/mail-providers" to (mailProvidersJson to HttpStatusCode.OK),
-            ),
-        )
-        store.start()
-        awaitUntil { store.state.value.mailProviders.isNotEmpty() }
-        store.selectMailProvider(store.state.value.mailProviders.first())
-
-        store.backToProviders()
-        assertEquals(SignInStep.CHOOSE_MAIL_SERVICE, store.state.value.step)
-
-        store.backToProviders()
-        assertEquals(SignInStep.CHOOSE_PROVIDER, store.state.value.step)
     }
 
     @Test
@@ -284,62 +166,6 @@ class SignInStoreTest {
 
         assertEquals(SignInStep.CHOOSE_PROVIDER, store.state.value.step)
         assertEquals("access_denied", store.state.value.error?.code)
-    }
-
-    @Test
-    fun the_exchange_form_validates_before_hitting_the_network() {
-        val store = store()
-
-        val errors = store.validateExchangeForm(
-            SignInUiState(email = "", password = "", imapPort = "70000", smtpPort = "0"),
-        )
-
-        assertEquals("Enter your email address", errors["email"])
-        assertEquals("Enter your password", errors["password"])
-        assertNotNull(errors["imapPort"])
-        assertNotNull(errors["smtpPort"])
-    }
-
-    @Test
-    fun a_well_formed_exchange_form_passes_validation() {
-        val store = store()
-
-        val errors = store.validateExchangeForm(
-            SignInUiState(email = "ada@example.com", password = "secret", imapPort = "993", smtpPort = "587"),
-        )
-
-        assertTrue(errors.isEmpty())
-    }
-
-    @Test
-    fun port_input_ignores_anything_that_is_not_a_digit() {
-        val store = store()
-
-        store.updateImapPort("99a3!")
-
-        assertEquals("993", store.state.value.imapPort)
-    }
-
-    @Test
-    fun a_rejected_exchange_sign_in_reopens_the_server_settings() = runTest {
-        val store = store(
-            mapOf(
-                "/auth/providers" to (providersJson to HttpStatusCode.OK),
-                "/exchange-server/sign-in" to (
-                    """{"code":"imap_host_required","message":"Enter the mail server",
-                        "details":{"field":"imapHost"}}""" to HttpStatusCode.BadRequest
-                    ),
-            ),
-        )
-        store.updateEmail("ada@acme-corp.example")
-        store.updatePassword("secret")
-        settle(50)
-
-        store.submitExchangeSignIn()
-        awaitUntil(describe = { "the sign-in failure" }) { store.state.value.error != null }
-
-        assertTrue(store.state.value.showAdvanced)
-        assertFalse(store.state.value.isSubmitting)
     }
 
     @Test

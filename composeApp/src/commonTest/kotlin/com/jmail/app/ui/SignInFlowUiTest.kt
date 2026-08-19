@@ -48,15 +48,8 @@ class SignInFlowUiTest {
     private val jsonHeaders = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
 
     private val providersJson = """
-        [{"id":"EXCHANGE","displayName":"Microsoft Exchange or IMAP","kind":"CREDENTIALS","icon":"exchange"},
+        [{"id":"GOOGLE","displayName":"Continue with Google","kind":"OAUTH","icon":"google"},
          {"id":"DEMO","displayName":"Explore the demo mailbox","kind":"DEMO","icon":"demo"}]
-    """.trimIndent()
-
-    private val mailProvidersJson = """
-        [{"id":"gmail","displayName":"Gmail","imapHost":"imap.gmail.com","imapPort":993,
-          "smtpHost":"smtp.gmail.com","smtpPort":587,"useTls":true,"requiresAppPassword":true,
-          "appPasswordUrl":"https://myaccount.google.com/apppasswords",
-          "helpText":"Gmail needs a 16-character app password.","requiresManualServer":false}]
     """.trimIndent()
 
     private val userJson = """
@@ -70,27 +63,20 @@ class SignInFlowUiTest {
     """.trimIndent()
 
     private fun signInStore(
-        onSignInRequest: (String) -> Unit = {},
+        onOpenUrl: (String) -> Unit = {},
     ): Pair<SignInStore, SessionRepository> {
         val storage = InMemoryTokenStorage()
         val engine = MockEngine { request ->
             val path = request.url.encodedPath
             when {
                 path.endsWith("/auth/providers") -> respond(providersJson, HttpStatusCode.OK, jsonHeaders)
-                path.endsWith("/auth/mail-providers") -> respond(mailProvidersJson, HttpStatusCode.OK, jsonHeaders)
-                path.contains("/exchange-server/suggest") -> respond(
-                    """{"imapHost":"imap.gmail.com","imapPort":993,"smtpHost":"smtp.gmail.com",
-                        "smtpPort":587,"useTls":true,"confident":true,"providerId":"gmail",
-                        "providerName":"Gmail","requiresAppPassword":true,
-                        "appPasswordUrl":"https://myaccount.google.com/apppasswords",
-                        "helpText":"Gmail needs a 16-character app password."}""",
+                path.contains("/start") -> respond(
+                    """{"authorizationUrl":"https://accounts.google.com/o/oauth2/v2/auth?x=1",
+                        "state":"state-1","expiresInSeconds":600}""",
                     HttpStatusCode.OK,
                     jsonHeaders,
                 )
-                path.contains("/exchange-server/sign-in") -> {
-                    onSignInRequest(path)
-                    respond(tokensJson, HttpStatusCode.OK, jsonHeaders)
-                }
+                path.endsWith("/auth/exchange") -> respond(tokensJson, HttpStatusCode.OK, jsonHeaders)
                 else -> respond("""{"code":"not_found","message":"no stub for $path"}""", HttpStatusCode.NotFound, jsonHeaders)
             }
         }
@@ -105,42 +91,34 @@ class SignInFlowUiTest {
         )
         val repository = SessionRepository(api, storage)
         val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-        return SignInStore(repository, scope, openUrl = {}) to repository
+        return SignInStore(repository, scope, openUrl = onOpenUrl) to repository
     }
 
     @Test
     fun a_user_can_go_from_the_first_screen_to_a_connected_account() = runComposeUiTest {
-        var signInAttempts = 0
-        val (store, repository) = signInStore(onSignInRequest = { signInAttempts++ })
+        val opened = mutableListOf<String>()
+        val (store, repository) = signInStore(onOpenUrl = { opened += it })
 
         setContent {
             val state by store.state.collectAsState()
             JMailTheme { SignInScreen(state = state, store = store) }
         }
 
-        // 1. The first screen offers using your own email address.
-        waitUntilAtLeastOneExists(hasText("Use your email address"), timeoutMillis = 5_000)
-        onNodeWithText("Use your email address").performClick()
+        // 1. The first screen offers the provider, and nothing that asks for a password.
+        waitUntilAtLeastOneExists(hasText("Continue with Google"), timeoutMillis = 5_000)
+        onNodeWithText("Continue with Google").performClick()
 
-        // 2. Which opens the list of real services.
-        waitUntilAtLeastOneExists(hasText("Choose your mail service"), timeoutMillis = 5_000)
-        onNodeWithText("Gmail").assertIsDisplayed()
-        onNodeWithText("Gmail").performClick()
+        // 2. Which hands the browser the provider's authorization URL...
+        waitUntil(timeoutMillis = 5_000) { opened.isNotEmpty() }
+        assertTrue(opened.single().startsWith("https://accounts.google.com/"), opened.single())
 
-        // 3. The form knows which service it is connecting, and warns about app passwords.
-        waitUntilAtLeastOneExists(hasText("This service needs an app password"), timeoutMillis = 5_000)
-        onNodeWithText("App password").assertIsDisplayed()
+        // 3. ...and the screen waits for the redirect rather than asking for anything else.
+        waitUntilAtLeastOneExists(hasText("Finish signing in in your browser"), timeoutMillis = 5_000)
 
-        // 4. Fill it in and connect.
-        onNodeWithText("Email address").performTextInput("ada@gmail.com")
-        onNodeWithText("App password").performTextInput("abcd efgh ijkl mnop")
-        onNodeWithText("Connect").performClick()
-
-        // 5. The account is connected and the session is live.
-        waitUntilAtLeastOneExists(hasText("Choose your mail service").not(), timeoutMillis = 5_000)
+        // 4. The redirect comes back carrying a handoff code, which completes the session.
+        store.completeOAuthSignIn("handoff-code")
         waitUntil(timeoutMillis = 5_000) { repository.sessionState.value is SessionState.SignedIn }
 
-        assertEquals(1, signInAttempts)
         assertTrue(repository.sessionState.value is SessionState.SignedIn)
     }
 }
@@ -169,7 +147,7 @@ class AddAccountFlowUiTest {
     """.trimIndent()
 
     private val addedAccount = """
-        {"id":"acc-2","provider":"IMAP","providerName":"IMAP","email":"ada@gmail.com",
+        {"id":"acc-2","provider":"GOOGLE","providerName":"Google","email":"ada@gmail.com",
          "displayName":"Ada","status":"CONNECTED","isPrimary":false,"color":"#0EA5E9"}
     """.trimIndent()
 
@@ -187,14 +165,7 @@ class AddAccountFlowUiTest {
                     jsonHeaders,
                 )
                 path.endsWith("/auth/providers") -> respond(
-                    """[{"id":"EXCHANGE","displayName":"Microsoft Exchange or IMAP","kind":"CREDENTIALS","icon":"exchange"}]""",
-                    HttpStatusCode.OK,
-                    jsonHeaders,
-                )
-                path.endsWith("/auth/mail-providers") -> respond(
-                    """[{"id":"other","displayName":"Other (IMAP)","imapHost":"","imapPort":993,
-                        "smtpHost":"","smtpPort":587,"useTls":true,"requiresAppPassword":false,
-                        "appPasswordUrl":null,"helpText":null,"requiresManualServer":true}]""",
+                    """[{"id":"GOOGLE","displayName":"Continue with Google","kind":"OAUTH","icon":"google"}]""",
                     HttpStatusCode.OK,
                     jsonHeaders,
                 )
@@ -240,7 +211,7 @@ class AddAccountFlowUiTest {
         // The add-account screen is reachable and offers the same real options as sign-in —
         // this is the assertion that fails if "add another mailbox" leads nowhere.
         waitUntilAtLeastOneExists(hasText("Add another mailbox"), timeoutMillis = 5_000)
-        onNodeWithText("Use your email address").assertIsDisplayed()
+        onNodeWithText("Continue with Google").assertIsDisplayed()
         onNodeWithText("Cancel").assertIsDisplayed()
     }
 }

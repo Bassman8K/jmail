@@ -57,7 +57,7 @@ enum class AccountProvider {
 enum class AccountStatus { CONNECTED, REAUTH_REQUIRED, SYNCING, ERROR, DISABLED }
 
 @Serializable
-enum class SignInKind { OAUTH, CREDENTIALS, DEMO }
+enum class SignInKind { OAUTH, DEMO }
 
 @Serializable
 enum class UiTheme { SYSTEM, LIGHT, DARK }
@@ -117,37 +117,6 @@ data class StartAuthorization(
     val authorizationUrl: String,
     val state: String,
     val expiresInSeconds: Long,
-)
-
-@Serializable
-data class ExchangeSuggestion(
-    val imapHost: String,
-    val imapPort: Int,
-    val smtpHost: String,
-    val smtpPort: Int,
-    val useTls: Boolean,
-    val confident: Boolean,
-    val providerId: String? = null,
-    val providerName: String? = null,
-    val requiresAppPassword: Boolean = false,
-    val appPasswordUrl: String? = null,
-    val helpText: String? = null,
-)
-
-/** A mail service that can be connected with an address and a password. */
-@Serializable
-data class MailProviderOption(
-    val id: String,
-    val displayName: String,
-    val imapHost: String = "",
-    val imapPort: Int = 993,
-    val smtpHost: String = "",
-    val smtpPort: Int = 587,
-    val useTls: Boolean = true,
-    val requiresAppPassword: Boolean = false,
-    val appPasswordUrl: String? = null,
-    val helpText: String? = null,
-    val requiresManualServer: Boolean = false,
 )
 
 // ---------------------------------------------------------------------------
@@ -338,18 +307,6 @@ data class MessageActionRequest(
 data class AssignCategoryRequest(
     val messageIds: List<String>,
     val categoryId: String? = null,
-)
-
-@Serializable
-data class ExchangeSignInRequest(
-    val email: String,
-    val password: String,
-    val imapHost: String? = null,
-    val imapPort: Int? = null,
-    val smtpHost: String? = null,
-    val smtpPort: Int? = null,
-    val useTls: Boolean = true,
-    val displayName: String? = null,
 )
 
 @Serializable

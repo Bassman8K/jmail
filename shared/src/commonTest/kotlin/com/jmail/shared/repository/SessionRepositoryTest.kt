@@ -2,7 +2,6 @@ package com.jmail.shared.repository
 
 import com.jmail.shared.authTokensJson
 import com.jmail.shared.fakeApiClient
-import com.jmail.shared.model.ExchangeSignInRequest
 import com.jmail.shared.model.UiTheme
 import com.jmail.shared.model.UpdatePreferencesRequest
 import com.jmail.shared.network.InMemoryTokenStorage
@@ -81,25 +80,6 @@ class SessionRepositoryTest {
         assertTrue(result.isSuccess)
         assertTrue(repository.sessionState.value is SessionState.SignedIn)
         assertEquals("access-1", storage.readAccessToken())
-    }
-
-    @Test
-    fun an_exchange_sign_in_adopts_the_returned_user() = runTest {
-        val storage = InMemoryTokenStorage()
-        val repository = SessionRepository(
-            fakeApiClient(
-                mapOf("/exchange-server/sign-in" to (authTokensJson() to HttpStatusCode.OK)),
-                tokenStorage = storage,
-            ),
-            storage,
-        )
-
-        val result = repository.signInWithExchange(
-            ExchangeSignInRequest(email = "ada@corp.example", password = "secret"),
-        )
-
-        assertTrue(result.isSuccess)
-        assertNotNull(repository.currentUser)
     }
 
     @Test
@@ -207,24 +187,4 @@ class SessionRepositoryTest {
         assertEquals(1, repository.availableProviders().getOrNull()?.size)
     }
 
-    @Test
-    fun exchange_settings_are_suggested_before_sign_in() = runTest {
-        val repository = SessionRepository(
-            fakeApiClient(
-                mapOf(
-                    "/exchange-server/suggest" to (
-                        """{"imapHost":"outlook.office365.com","imapPort":993,
-                            "smtpHost":"smtp.office365.com","smtpPort":587,"useTls":true,"confident":true}"""
-                            to HttpStatusCode.OK
-                        ),
-                ),
-            ),
-            InMemoryTokenStorage(),
-        )
-
-        val suggestion = repository.suggestExchangeSettings("ada@outlook.com").getOrNull()
-
-        assertEquals("outlook.office365.com", suggestion?.imapHost)
-        assertTrue(suggestion?.confident == true)
-    }
 }

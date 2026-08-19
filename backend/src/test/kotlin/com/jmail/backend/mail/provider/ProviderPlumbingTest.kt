@@ -148,10 +148,9 @@ class MailProviderRegistryTest {
 
     private val gmail: MailProvider = mockk { every { provider } returns AccountProvider.GOOGLE }
     private val graph: MailProvider = mockk { every { provider } returns AccountProvider.MICROSOFT }
-    private val imap: MailProvider = mockk { every { provider } returns AccountProvider.EXCHANGE }
     private val demo: MailProvider = mockk { every { provider } returns AccountProvider.DEMO }
 
-    private val registry = MailProviderRegistry(listOf(gmail, graph, imap, demo))
+    private val registry = MailProviderRegistry(listOf(gmail, graph, demo))
 
     @Test
     fun each_account_resolves_to_its_own_client() {
@@ -161,9 +160,15 @@ class MailProviderRegistryTest {
     }
 
     @Test
-    fun a_plain_imap_account_reuses_the_exchange_client() {
-        // The protocol is identical; the distinction exists for labelling and autodiscovery.
-        assertEquals(imap, registry.forAccount(MailAccount(provider = AccountProvider.IMAP)))
+    fun an_account_from_before_web_only_sign_in_is_reported_as_unsyncable() {
+        // EXCHANGE and IMAP rows can still exist in a database created before sign-in became
+        // browser-only. They have no client any more, and must say so rather than fail oddly.
+        listOf(AccountProvider.EXCHANGE, AccountProvider.IMAP).forEach { provider ->
+            val failure = assertThrows<BadRequestException> {
+                registry.forAccount(MailAccount(provider = provider))
+            }
+            assertEquals("unsupported_provider", failure.code)
+        }
     }
 
     @Test
@@ -176,11 +181,14 @@ class MailProviderRegistryTest {
     }
 
     @Test
-    fun an_apple_account_without_a_mailbox_is_not_syncable() {
-        // Sign in with Apple proves identity; iCloud mail is added separately over IMAP.
+    fun only_accounts_with_a_client_are_syncable() {
+        // Sign in with Apple proves identity, but iCloud has no mail API — so an Apple
+        // account has nothing to sync, and the scheduler must skip it rather than fail it.
         assertTrue(!registry.canSync(MailAccount(provider = AccountProvider.APPLE)))
-        assertTrue(registry.canSync(MailAccount(provider = AccountProvider.APPLE, imapHost = "imap.mail.me.com")))
+        assertTrue(!registry.canSync(MailAccount(provider = AccountProvider.IMAP)))
         assertTrue(registry.canSync(MailAccount(provider = AccountProvider.GOOGLE)))
+        assertTrue(registry.canSync(MailAccount(provider = AccountProvider.MICROSOFT)))
+        assertTrue(registry.canSync(MailAccount(provider = AccountProvider.DEMO)))
     }
 }
 

@@ -4,8 +4,8 @@
 
 **All your mail, in one place.**
 
-A unified mail client for Gmail, Outlook, iCloud, Yahoo, Microsoft Exchange and anything
-else that speaks IMAP — with categories that sort your inbox for you.
+A unified mail client for Gmail and Microsoft 365 — sign in on your provider's own page,
+with categories that sort your inbox for you.
 
 One codebase: **desktop · web · Android · iOS**
 
@@ -87,17 +87,18 @@ installs directly and upgrades in place across releases.
 
 ## What it does
 
-### Sign in with the mail you already have
-Gmail, Outlook.com, Microsoft 365, iCloud, Yahoo, AOL, Fastmail, Zoho, GMX, Mail.com, Proton
-(via Bridge), Yandex, on-premises Exchange, or any other IMAP server. Pick your service and
-the server settings fill themselves in.
+### Sign in on your provider's page, not on ours
+**Continue with Google**, **Continue with Microsoft**, **Continue with Apple**. You
+authenticate on the provider's own website and come back — JMail never sees your password,
+and there are no app passwords to create or store.
 
-JMail also tells you **before** you type that Gmail, iCloud and Yahoo will not accept your
-normal password — they require an app password — and links you straight to the page that
-issues one. That single detail is the difference between signing in and giving up.
+Mail is read through the Gmail API and Microsoft Graph. Sign in with Apple establishes an
+identity only: Apple publishes no mail API, so an Apple account carries no mailbox.
 
-"Continue with Google", Microsoft and Apple OAuth are supported too, once you add
-credentials. See **[docs/CONNECTING-ACCOUNTS.md](docs/CONNECTING-ACCOUNTS.md)**.
+Each provider needs an OAuth client, which they require every app to register.
+**[docs/CONNECTING-ACCOUNTS.md](docs/CONNECTING-ACCOUNTS.md)** walks through it, including
+the exact redirect URIs. A provider with no credentials configured is simply not offered on
+the sign-in screen, so there is never a button that leads nowhere.
 
 ### One inbox, many accounts
 Connect as many mailboxes as you like. Each gets its own accent colour so a unified list
@@ -159,7 +160,7 @@ tonal elevation rather than going pure black.
 composeApp/   Compose Multiplatform UI — every screen, every platform
 shared/       Kotlin Multiplatform: API client, repositories, state holders
 backend/      Spring Boot: auth, mail sync, categorisation, REST API
-docker/       PostgreSQL, a local IMAP/SMTP server, container images
+docker/       PostgreSQL, container images
 ```
 
 | Layer | Technology |
@@ -168,7 +169,7 @@ docker/       PostgreSQL, a local IMAP/SMTP server, container images
 | Shared logic | Kotlin Multiplatform 2.1, Ktor client, kotlinx.serialization |
 | Backend | Spring Boot 3.4, Kotlin, Gradle Kotlin DSL |
 | Database | PostgreSQL 17 with Flyway migrations |
-| Mail | Gmail REST API, Microsoft Graph, IMAP/SMTP (Jakarta Mail) |
+| Mail | Gmail REST API, Microsoft Graph |
 | Auth | OAuth 2.0 + PKCE, HS256 sessions, AES-GCM credential encryption |
 
 **The client never holds a provider credential.** Every Google, Microsoft and Apple token
@@ -186,22 +187,22 @@ The design decisions, and the seams that would need attention at scale, are writ
 ./run.sh test
 ```
 
-**625 tests**, all passing:
+**554 tests**, all passing:
 
 | Suite | Count | What it covers |
 |---|---|---|
-| Backend | 418 | Units, plus integration against real PostgreSQL and a real IMAP and SMTP server |
-| Shared | 164 | API client, repositories, state holders, the desktop session file |
+| Backend | 358 | Units, plus integration against a real PostgreSQL and the full Spring stack |
+| Shared | 153 | API client, repositories, state holders, the desktop and Android session stores |
 | UI | 43 | Compose UI tests that drive the actual screens |
 
-Line coverage is enforced at **92%** by `koverVerify` (currently 94.3%), branch coverage at
-**70%** (currently 74.3%); the report lands in `build/reports/kover/html/index.html`.
+Line coverage is enforced at **92%** by `koverVerify` (currently 94.5%), branch coverage at
+**70%** (currently 76.3%); the report lands in `build/reports/kover/html/index.html`.
 
 Coverage is measured over code that has behaviour to assert. Serialization models and
 framework wiring are excluded — see the annotated list in `build.gradle.kts`. Leaving them
 in made the branch figure a report on the Kotlin compiler's generated `equals`, `hashCode`
-and `copy` rather than on JMail: they accounted for 781 of 1,263 uncovered branches while
-contributing 41 uncovered lines.
+and `copy` rather than on JMail: when they were measured they accounted for
+781 of 1,263 uncovered branches while contributing 41 uncovered lines.
 
 The integration tests use whichever PostgreSQL is available: an explicit `JMAIL_TEST_DB_URL`,
 the local `docker compose` stack, or a Testcontainers instance — so they run the same way on
@@ -211,10 +212,12 @@ a laptop and in CI.
 
 ## Connecting a real account
 
-Nothing to configure. Choose **Use your email address**, pick your service, and sign in with
-an app password. **[docs/CONNECTING-ACCOUNTS.md](docs/CONNECTING-ACCOUNTS.md)** has
-click-by-click steps for Gmail, Microsoft and Apple, including the exact redirect URIs if you
-want the OAuth buttons instead.
+Sign-in goes through the provider's own website, which means registering an OAuth client
+with them first — a one-off, ten minutes for Google.
+**[docs/CONNECTING-ACCOUNTS.md](docs/CONNECTING-ACCOUNTS.md)** has click-by-click steps for
+Gmail, Microsoft and Apple, including the exact redirect URIs.
+
+Until you do, **Explore the demo mailbox** needs no configuration at all.
 
 `.env.example` documents every setting. A provider with no credentials configured is simply
 not offered on the sign-in screen, so there is never a button that leads nowhere.
@@ -253,8 +256,11 @@ Stated plainly, so nothing here is a surprise:
 - **Message bodies render as text, not HTML.** Rendering sender-authored HTML means embedding
   a browser engine on four platforms and accepting its tracking and exploit surface. Links are
   detected and clickable; formatting is not preserved.
-- **Sign in with Apple does not grant mailbox access** — Apple provides no mail API. It
-  identifies you; iCloud mail is then connected with an app password.
+- **Sign in with Apple does not grant mailbox access** — Apple provides no mail API, so an
+  Apple account signs in but has no mail to show. Only Gmail and Microsoft mailboxes sync.
+- **No IMAP.** Signing in with an address and password was removed in favour of the browser
+  flow, which also removed the app passwords each provider demanded. iCloud, Yahoo, Fastmail,
+  Proton and self-hosted servers are therefore not supported.
 - **The demo mailbox does not receive new mail.** Refresh honestly reports "No new mail".
 - **Auth state is in memory.** PKCE sessions and handoff codes expire in minutes, so a restart
   costs one retry — but a multi-instance deployment needs sticky sessions or Redis.

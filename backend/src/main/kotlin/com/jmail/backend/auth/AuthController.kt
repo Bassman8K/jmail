@@ -1,11 +1,8 @@
 package com.jmail.backend.auth
 
 import com.jmail.backend.auth.dto.AuthTokensResponse
-import com.jmail.backend.auth.dto.ExchangeSignInRequest
-import com.jmail.backend.auth.dto.ExchangeSuggestionResponse
 import com.jmail.backend.auth.dto.HandoffExchangeRequest
 import com.jmail.backend.auth.dto.LogoutRequest
-import com.jmail.backend.auth.dto.MailProviderResponse
 import com.jmail.backend.auth.dto.ProviderSummary
 import com.jmail.backend.auth.dto.RefreshTokenRequest
 import com.jmail.backend.auth.dto.StartAuthorizationResponse
@@ -19,7 +16,6 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirements
 import io.swagger.v3.oas.annotations.tags.Tag
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
-import jakarta.validation.constraints.Email
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
@@ -50,7 +46,7 @@ import java.net.URI
 @RestController
 @RequestMapping("/api/v1/auth")
 @Validated
-@Tag(name = "Authentication", description = "Sign in with Google, Microsoft, Apple, Exchange or IMAP")
+@Tag(name = "Authentication", description = "Sign in with Google, Microsoft or Apple")
 @SecurityRequirements // this whole controller is reachable without a token
 class AuthController(
     private val authService: AuthService,
@@ -206,41 +202,6 @@ class AuthController(
         )
         return ResponseEntity.noContent().build()
     }
-
-    @PostMapping("/exchange-server/sign-in")
-    @Operation(
-        summary = "Sign in to an on-premises Exchange or generic IMAP mailbox",
-        description = "Credentials are verified against the real server before anything is " +
-            "stored, then held encrypted at rest.",
-    )
-    fun signInWithExchange(
-        @Valid @RequestBody request: ExchangeSignInRequest,
-        httpRequest: HttpServletRequest,
-        @AuthenticationPrincipal currentUser: AuthenticatedUser?,
-    ): AuthTokensResponse = authService.signInWithExchange(
-        request = request,
-        userAgent = httpRequest.getHeader(HttpHeaders.USER_AGENT),
-        clientIp = clientAddress(httpRequest),
-        linkToUserId = currentUser?.userId,
-    )
-
-    @GetMapping("/exchange-server/suggest")
-    @Operation(
-        summary = "Suggest IMAP and SMTP settings for an address",
-        description = "Lets the sign-in form pre-fill the server fields so most people never " +
-            "open the advanced section.",
-    )
-    fun suggestExchangeSettings(
-        @RequestParam @Email(message = "That does not look like an email address") email: String,
-    ): ExchangeSuggestionResponse = authService.suggestExchangeSettings(email)
-
-    @GetMapping("/mail-providers")
-    @Operation(
-        summary = "Mail services that can be connected with an address and password",
-        description = "Everything from Gmail and iCloud to a self-hosted IMAP server, with " +
-            "the server settings and whether the service requires an app password.",
-    )
-    fun mailProviders(): List<MailProviderResponse> = authService.knownMailProviders()
 
     @PostMapping("/demo")
     @Operation(

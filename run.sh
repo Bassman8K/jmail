@@ -147,8 +147,8 @@ stop_pid_file() {
 # Infrastructure
 # ---------------------------------------------------------------------------
 start_infrastructure() {
-  step "Starting PostgreSQL and the local mail server"
-  docker compose -f "$COMPOSE_FILE" --env-file .env up -d postgres greenmail >/dev/null 2>&1
+  step "Starting PostgreSQL"
+  docker compose -f "$COMPOSE_FILE" --env-file .env up -d postgres >/dev/null 2>&1
 
   printf '  waiting for PostgreSQL'
   local waited=0

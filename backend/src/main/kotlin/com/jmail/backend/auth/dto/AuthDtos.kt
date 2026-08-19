@@ -7,21 +7,15 @@ import com.jmail.backend.user.UiDensity
 import com.jmail.backend.user.UiTheme
 import com.jmail.backend.user.UserAccount
 import io.swagger.v3.oas.annotations.media.Schema
-import jakarta.validation.constraints.Email
-import jakarta.validation.constraints.Max
-import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
 import java.time.Instant
 import java.util.UUID
 
-/** How a provider asks for credentials, which decides what the sign-in button does. */
+/** How a provider authenticates, which decides what the sign-in button does. */
 enum class SignInKind {
-    /** Redirect to the provider, come back with a code. */
+    /** Redirect to the provider in a browser, come back with a code. */
     OAUTH,
-
-    /** Collect a username, password and server on our own form. */
-    CREDENTIALS,
 
     /** One click into a seeded mailbox; local development only. */
     DEMO,
@@ -58,69 +52,6 @@ data class LogoutRequest(
     val refreshToken: String? = null,
     @get:Schema(description = "Sign out of every device rather than just this one")
     val allSessions: Boolean = false,
-)
-
-@Schema(description = "Credentials for an on-premises Exchange or generic IMAP mailbox")
-data class ExchangeSignInRequest(
-    @field:NotBlank(message = "An email address is required")
-    @field:Email(message = "That does not look like an email address")
-    val email: String,
-
-    @field:NotBlank(message = "A password is required")
-    @field:Size(max = 512, message = "That password is implausibly long")
-    val password: String,
-
-    @get:Schema(description = "Left blank, JMail suggests a server from the address domain")
-    val imapHost: String? = null,
-
-    @field:Min(1) @field:Max(65535)
-    val imapPort: Int? = null,
-
-    val smtpHost: String? = null,
-
-    @field:Min(1) @field:Max(65535)
-    val smtpPort: Int? = null,
-
-    val useTls: Boolean = true,
-
-    @field:Size(max = 200)
-    val displayName: String? = null,
-)
-
-@Schema(description = "Server settings JMail suggests for an address")
-data class ExchangeSuggestionResponse(
-    val imapHost: String,
-    val imapPort: Int,
-    val smtpHost: String,
-    val smtpPort: Int,
-    val useTls: Boolean,
-    @get:Schema(description = "False when these are a naming-convention guess rather than known settings")
-    val confident: Boolean,
-    @get:Schema(description = "The recognised service, when the address identifies one", example = "gmail")
-    val providerId: String? = null,
-    val providerName: String? = null,
-    @get:Schema(description = "True when the service refuses an account password over IMAP")
-    val requiresAppPassword: Boolean = false,
-    @get:Schema(description = "Where to create that app password")
-    val appPasswordUrl: String? = null,
-    @get:Schema(description = "One sentence to show under the password field")
-    val helpText: String? = null,
-)
-
-@Schema(description = "A mail service JMail can connect to with an address and password")
-data class MailProviderResponse(
-    val id: String,
-    val displayName: String,
-    val imapHost: String,
-    val imapPort: Int,
-    val smtpHost: String,
-    val smtpPort: Int,
-    val useTls: Boolean,
-    val requiresAppPassword: Boolean,
-    val appPasswordUrl: String?,
-    val helpText: String?,
-    @get:Schema(description = "True when the user must type the server themselves")
-    val requiresManualServer: Boolean,
 )
 
 @Schema(description = "A signed-in session")

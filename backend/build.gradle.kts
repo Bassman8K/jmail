@@ -56,7 +56,6 @@ dependencies {
     testImplementation(libs.assertk)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
-    testImplementation(libs.greenmail.junit5)
     testImplementation(libs.archunit.junit5)
     testImplementation(libs.kotlinx.coroutines.test)
     testRuntimeOnly(libs.h2) // fast slice tests that do not need a container

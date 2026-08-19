@@ -1,7 +1,6 @@
 package com.jmail.backend.user
 
 import com.jmail.backend.auth.CredentialCipher
-import com.jmail.backend.auth.ExchangeCredentials
 import com.jmail.backend.auth.oauth.OAuthTokens
 import com.jmail.backend.auth.oauth.ProviderProfile
 import com.jmail.backend.config.JmailProperties
@@ -207,51 +206,6 @@ class AccountProvisioningServiceTest {
         )
 
         assertEquals("Ada Lovelace", user.displayName)
-    }
-
-    @Test
-    fun `an exchange sign-in stores the server settings and encrypts the password`() {
-        every { userRepository.findByEmail(any()) } returns null
-        every { accountRepository.findByUserIdAndProviderAndProviderAccountId(any(), any(), any()) } returns null
-        val saved = slot<MailAccount>()
-        every { accountRepository.save(capture(saved)) } answers { saved.captured }
-
-        service.completeCredentialSignIn(
-            AccountProvider.EXCHANGE,
-            ExchangeCredentials(
-                email = "Ada@Corp.Example",
-                password = "hunter2",
-                imapHost = "imap.corp.example",
-                imapPort = 993,
-                smtpHost = "smtp.corp.example",
-                smtpPort = 587,
-                displayName = "Ada at work",
-            ),
-        )
-
-        assertEquals("ada@corp.example", saved.captured.email)
-        assertEquals("imap.corp.example", saved.captured.imapHost)
-        assertEquals(587, saved.captured.smtpPort)
-        assertNotEquals("hunter2", saved.captured.passwordSecret)
-        assertEquals("hunter2", cipher.decrypt(saved.captured.passwordSecret))
-    }
-
-    @Test
-    fun `an exchange account with no display name falls back to the local part`() {
-        every { userRepository.findByEmail(any()) } returns null
-        every { accountRepository.findByUserIdAndProviderAndProviderAccountId(any(), any(), any()) } returns null
-
-        val user = service.completeCredentialSignIn(
-            AccountProvider.IMAP,
-            ExchangeCredentials(
-                email = "ada@corp.example",
-                password = "x",
-                imapHost = "imap.corp.example",
-                smtpHost = "smtp.corp.example",
-            ),
-        )
-
-        assertEquals("ada", user.displayName)
     }
 
     @Test

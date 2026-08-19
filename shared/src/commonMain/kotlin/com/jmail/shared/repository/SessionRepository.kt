@@ -1,9 +1,6 @@
 package com.jmail.shared.repository
 
 import com.jmail.shared.model.AuthTokens
-import com.jmail.shared.model.ExchangeSignInRequest
-import com.jmail.shared.model.ExchangeSuggestion
-import com.jmail.shared.model.MailProviderOption
 import com.jmail.shared.model.ProviderSummary
 import com.jmail.shared.model.UpdatePreferencesRequest
 import com.jmail.shared.model.User
@@ -71,9 +68,6 @@ class SessionRepository(
 
     suspend fun availableProviders(): ApiResult<List<ProviderSummary>> = apiClient.providers()
 
-    /** Every mail service that can be connected with an address and password. */
-    suspend fun mailProviders(): ApiResult<List<MailProviderOption>> = apiClient.mailProviders()
-
     /** Returns the URL the client should open in a browser for an OAuth sign-in. */
     suspend fun beginOAuthSignIn(provider: String, target: String): ApiResult<String> =
         apiClient.startAuthorization(provider, target).map { it.authorizationUrl }
@@ -81,12 +75,6 @@ class SessionRepository(
     /** Completes an OAuth sign-in with the handoff code carried back by the redirect. */
     suspend fun completeOAuthSignIn(handoffCode: String): ApiResult<User> =
         apiClient.exchangeHandoff(handoffCode).map(::adopt)
-
-    suspend fun signInWithExchange(request: ExchangeSignInRequest): ApiResult<User> =
-        apiClient.signInWithExchangeServer(request).map(::adopt)
-
-    suspend fun suggestExchangeSettings(email: String): ApiResult<ExchangeSuggestion> =
-        apiClient.suggestExchangeSettings(email)
 
     suspend fun signInAsDemo(): ApiResult<User> = apiClient.signInAsDemo().map(::adopt)
 

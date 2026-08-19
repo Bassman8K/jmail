@@ -12,7 +12,7 @@ import org.springframework.web.client.RestClient
  * work/school accounts and Exchange Online mailboxes via Microsoft Graph.
  *
  * This is the *cloud* Microsoft path. On-premises Exchange, which has no OAuth endpoint of
- * its own, is handled by ExchangeAuthenticator over IMAP/EWS instead.
+ * its own, is not reachable: JMail signs in through the browser only.
  */
 @Component
 class MicrosoftOAuthClient(

@@ -1,9 +1,6 @@
 package com.jmail.backend.auth
 
 import com.jmail.backend.auth.dto.AuthTokensResponse
-import com.jmail.backend.auth.dto.ExchangeSignInRequest
-import com.jmail.backend.auth.dto.ExchangeSuggestionResponse
-import com.jmail.backend.auth.dto.MailProviderResponse
 import com.jmail.backend.auth.dto.ProviderSummary
 import com.jmail.backend.auth.dto.SignInKind
 import com.jmail.backend.auth.dto.StartAuthorizationResponse
@@ -45,7 +42,6 @@ class AuthService(
     private val sessionStore: AuthSessionStore,
     private val tokenService: TokenService,
     private val provisioningService: AccountProvisioningService,
-    private val exchangeAuthenticator: ExchangeAuthenticator,
     private val demoMailboxSeeder: DemoMailboxSeeder,
     private val userRepository: UserRepository,
     private val appleOAuthClient: AppleOAuthClient,
@@ -67,17 +63,6 @@ class AuthService(
                     ),
                 )
             }
-
-        if (properties.exchange.enabled) {
-            add(
-                ProviderSummary(
-                    id = AccountProvider.EXCHANGE,
-                    displayName = "Microsoft Exchange or IMAP",
-                    kind = SignInKind.CREDENTIALS,
-                    icon = "exchange",
-                ),
-            )
-        }
 
         if (demoMailboxSeeder.isEnabled) {
             add(
@@ -200,123 +185,6 @@ class AuthService(
         }
     }
 
-    /**
-     * Signs in against an on-premises Exchange or generic IMAP server.
-     *
-     * Credentials are proven against the real server before anything is written, so a typo
-     * produces an error rather than a permanently broken account.
-     */
-    @Transactional
-    fun signInWithExchange(
-        request: ExchangeSignInRequest,
-        userAgent: String?,
-        clientIp: String?,
-        linkToUserId: UUID? = null,
-    ): AuthTokensResponse {
-        if (!properties.exchange.enabled) {
-            throw BadRequestException("provider_not_configured", "Exchange sign-in is disabled on this server")
-        }
-
-        val email = EmailAddresses.canonical(request.email)
-        val suggestion = exchangeAuthenticator.suggestSettings(email)
-
-        val credentials = ExchangeCredentials(
-            email = email,
-            password = request.password,
-            imapHost = request.imapHost?.takeIf { it.isNotBlank() } ?: suggestion.imapHost,
-            imapPort = request.imapPort ?: suggestion.imapPort,
-            smtpHost = request.smtpHost?.takeIf { it.isNotBlank() } ?: suggestion.smtpHost,
-            smtpPort = request.smtpPort ?: suggestion.smtpPort,
-            useTls = request.useTls,
-            displayName = request.displayName,
-        )
-
-        if (credentials.imapHost.isBlank()) {
-            throw BadRequestException(
-                "imap_host_required",
-                "Enter the mail server for this address — we could not work it out automatically",
-                mapOf("field" to "imapHost"),
-            )
-        }
-
-        verifyWithGuidance(credentials, suggestion.provider)
-
-        // Exchange Online and on-premises Exchange are labelled as such; everything else is
-        // an IMAP connection, whoever hosts it.
-        val provider = if (suggestion.provider?.id in EXCHANGE_PROVIDER_IDS) {
-            AccountProvider.EXCHANGE
-        } else {
-            AccountProvider.IMAP
-        }
-        val user = provisioningService.completeCredentialSignIn(provider, credentials, linkToUserId)
-
-        return issue(user, userAgent, clientIp)
-    }
-
-    /**
-     * Verifies credentials, and turns the provider's flat "authentication failed" into
-     * something the user can act on.
-     *
-     * Gmail, iCloud, Yahoo and the rest all reject an account password over IMAP once
-     * two-factor authentication is on, and they all report it identically. Without this, the
-     * user sees "wrong password", checks their password, finds it correct, and concludes the
-     * app is broken — which is the single most common way an IMAP sign-in is abandoned.
-     */
-    private fun verifyWithGuidance(
-        credentials: ExchangeCredentials,
-        provider: KnownMailProvider?,
-    ) {
-        try {
-            exchangeAuthenticator.verify(credentials)
-        } catch (failure: UnauthorizedException) {
-            if (failure.code == "exchange_authentication_failed" && provider?.requiresAppPassword == true) {
-                throw UnauthorizedException(
-                    "${provider.displayName} does not accept your normal password here. " +
-                        "Create an app password and use that instead.",
-                    "app_password_required",
-                )
-            }
-            throw failure
-        }
-    }
-
-    fun suggestExchangeSettings(email: String): ExchangeSuggestionResponse {
-        val suggestion = exchangeAuthenticator.suggestSettings(EmailAddresses.canonical(email))
-        val provider = suggestion.provider
-
-        return ExchangeSuggestionResponse(
-            imapHost = suggestion.imapHost,
-            imapPort = suggestion.imapPort,
-            smtpHost = suggestion.smtpHost,
-            smtpPort = suggestion.smtpPort,
-            useTls = suggestion.useTls,
-            confident = suggestion.confident,
-            providerId = provider?.id,
-            providerName = provider?.displayName,
-            requiresAppPassword = provider?.requiresAppPassword == true,
-            appPasswordUrl = provider?.appPasswordUrl,
-            helpText = provider?.helpText,
-        )
-    }
-
-    /** Every mail service the address-and-password sign-in knows how to reach. */
-    fun knownMailProviders(): List<MailProviderResponse> =
-        exchangeAuthenticator.knownProviders().map { provider ->
-            MailProviderResponse(
-                id = provider.id,
-                displayName = provider.displayName,
-                imapHost = provider.imapHost,
-                imapPort = provider.imapPort,
-                smtpHost = provider.smtpHost,
-                smtpPort = provider.smtpPort,
-                useTls = provider.useTls,
-                requiresAppPassword = provider.requiresAppPassword,
-                appPasswordUrl = provider.appPasswordUrl,
-                helpText = provider.helpText,
-                requiresManualServer = provider.imapHost.isBlank(),
-            )
-        }
-
     /** One-click sign-in to the seeded mailbox. Refused unless explicitly enabled. */
     @Transactional
     fun signInAsDemoUser(userAgent: String?, clientIp: String?): AuthTokensResponse {
@@ -356,8 +224,5 @@ class AuthService(
     private companion object {
         const val AUTHORIZATION_WINDOW_SECONDS = 600L
         const val APP_CALLBACK_SCHEME = "jmail://auth/callback"
-
-        /** Services that are Exchange, and are labelled that way on the account. */
-        val EXCHANGE_PROVIDER_IDS = setOf("office365", "exchange")
     }
 }

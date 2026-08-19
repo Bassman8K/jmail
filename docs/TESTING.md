@@ -92,16 +92,14 @@ attachment or star — rather than as six disconnected fragments.
 ---
 
 ### Connecting your own mailbox
-- Go back to the sign-in screen and choose **Use your email address**. You get a list of
-  real services — Gmail, Outlook.com, iCloud, Yahoo, Fastmail, Proton, an Exchange server
-  and so on.
-- Pick **Gmail**. The servers are filled in for you, and the form tells you *before* you
-  type anything that Gmail will not accept your normal password, with a button that opens
-  the page where you create an app password.
-- The same happens if you just type your address: JMail recognises the domain and adapts.
-- Sign in with a real app password and your actual mail syncs in.
-- Gmail, iCloud and Yahoo will not accept your account password — that is their policy, not
-  JMail's. **[docs/CONNECTING-ACCOUNTS.md](CONNECTING-ACCOUNTS.md)** covers both ways round it.
+- Sign-in goes through the provider's own website: **Continue with Google** opens Google's
+  page, you approve there, and JMail picks the session up when the browser comes back.
+- That needs an OAuth client registered with the provider first — a one-off, about ten
+  minutes. **[docs/CONNECTING-ACCOUNTS.md](CONNECTING-ACCOUNTS.md)** walks through it.
+- With none configured, the sign-in screen shows only the demo mailbox rather than a button
+  that cannot work.
+- Worth checking: nothing anywhere asks you for a mail password, and no app password is
+  needed for any provider.
 
 ## What is deliberately not there
 
@@ -112,8 +110,8 @@ Honest notes, so you are not hunting for things that were never built:
   embedding a browser engine on every platform and accepting the tracking and exploit
   surface that comes with it. Links are detected and clickable; formatting is not preserved.
 - **Attachments show as metadata in the demo.** There are no real bytes behind the demo
-  mailbox, so downloads are wired but have nothing to fetch. On a connected Gmail, Graph or
-  IMAP account they download normally.
+  mailbox, so downloads are wired but have nothing to fetch. On a connected Gmail or
+  Microsoft account they download normally.
 - **The demo mailbox does not receive new mail.** Pressing refresh checks and honestly
   reports "No new mail". Connect a real account to see sync do its thing.
 - **Sending from the demo account goes nowhere.** It lands in Sent and is not transmitted.
@@ -124,9 +122,8 @@ Honest notes, so you are not hunting for things that were never built:
 ./run.sh test
 ```
 
-625 tests: unit tests, integration tests against a real PostgreSQL, the address-and-password
-sign-in path against a real IMAP server, message sending against a real SMTP server, and
-Compose UI tests that drive the actual screens.
+554 tests: unit tests, integration tests against a real PostgreSQL and the full Spring
+stack, and Compose UI tests that drive the actual screens.
 
 Coverage is enforced at 92% of lines and 70% of branches, over the code that has behaviour to
 assert — serialization models and framework wiring are excluded, with the reasoning next to

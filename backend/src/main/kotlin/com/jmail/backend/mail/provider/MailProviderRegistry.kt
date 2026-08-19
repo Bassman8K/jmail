@@ -8,9 +8,9 @@ import org.springframework.stereotype.Component
 /**
  * Resolves the [MailProvider] that can serve a linked account.
  *
- * IMAP-only accounts reuse the Exchange implementation: the protocol is identical, and the
- * distinction exists only so the UI can label the account correctly and so that Exchange
- * autodiscovery defaults are applied to one and not the other.
+ * Only Google and Microsoft mailboxes can be synced: both are reached through their own API
+ * with an OAuth token. EXCHANGE and IMAP accounts predate web-only sign-in and no longer
+ * have an implementation, so they resolve to a clear "cannot sync" rather than to nothing.
  */
 @Component
 class MailProviderRegistry(providers: List<MailProvider>) {
@@ -19,17 +19,17 @@ class MailProviderRegistry(providers: List<MailProvider>) {
 
     fun forAccount(account: MailAccount): MailProvider = forProvider(account.provider)
 
-    fun forProvider(provider: AccountProvider): MailProvider {
-        val resolved = if (provider == AccountProvider.IMAP) AccountProvider.EXCHANGE else provider
-
-        return byProvider[resolved]
+    fun forProvider(provider: AccountProvider): MailProvider =
+        byProvider[provider]
             ?: throw BadRequestException(
                 "unsupported_provider",
                 "JMail cannot sync ${provider.displayName} mailboxes",
             )
-    }
 
-    /** Apple accounts sign in but carry no mailbox of their own; iCloud mail is added as IMAP. */
-    fun canSync(account: MailAccount): Boolean =
-        account.provider != AccountProvider.APPLE || account.imapHost != null
+    /**
+     * Apple issues an identity, not a mailbox: iCloud has no mail API, and the IMAP route
+     * that used to reach it went with password sign-in. An Apple account therefore signs in
+     * but has nothing to sync, and the sync scheduler skips it rather than failing it.
+     */
+    fun canSync(account: MailAccount): Boolean = byProvider.containsKey(account.provider)
 }

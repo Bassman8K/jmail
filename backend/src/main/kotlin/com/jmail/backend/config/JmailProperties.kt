@@ -20,7 +20,6 @@ data class JmailProperties(
     val demo: DemoProperties = DemoProperties(),
     val sync: SyncProperties = SyncProperties(),
     val providers: ProvidersProperties = ProvidersProperties(),
-    val exchange: ExchangeProperties = ExchangeProperties(),
 ) {
 
     data class SecurityProperties(
@@ -88,12 +87,4 @@ data class JmailProperties(
         fun issuerResolved(): String = issuer.replace("{tenant}", tenantId)
     }
 
-    data class ExchangeProperties(
-        val enabled: Boolean = true,
-        val defaultHost: String = "",
-        val defaultImapPort: Int = 993,
-        val defaultSmtpPort: Int = 587,
-        val connectTimeout: Duration = Duration.ofSeconds(10),
-        val readTimeout: Duration = Duration.ofSeconds(30),
-    )
 }
