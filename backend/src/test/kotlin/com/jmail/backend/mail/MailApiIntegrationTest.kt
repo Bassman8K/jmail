@@ -9,6 +9,7 @@ import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -396,5 +397,148 @@ class MailApiIntegrationTest : AbstractIntegrationTest() {
         }
             .andExpect { status { isBadRequest() } }
             .andExpect { jsonPath("$.code") { value("invalid_regex") } }
+    }
+
+    // ---- syncing -----------------------------------------------------------
+
+    @Test
+    fun `syncing every account reports an outcome for each one`() {
+        val response = authPost("/api/v1/messages/sync")
+            .andExpect { status { isOk() } }
+            .andReturn().response.contentAsString
+
+        val outcomes = objectMapper.readTree(response)
+        assertTrue(outcomes.isArray)
+        assertTrue(outcomes.size() >= 1, "the demo user has one account")
+        outcomes.forEach { outcome ->
+            assertTrue(outcome.path("accountId").asText().isNotBlank())
+            assertTrue(outcome.path("status").asText().isNotBlank())
+        }
+    }
+
+    @Test
+    fun `syncing one account by id reports only that one`() {
+        val accountId = objectMapper.readTree(
+            authGet("/api/v1/users/me").andReturn().response.contentAsString,
+        ).path("accounts").first().path("id").asText()
+
+        val response = authPost("/api/v1/messages/sync?accountId=$accountId")
+            .andExpect { status { isOk() } }
+            .andReturn().response.contentAsString
+
+        val outcomes = objectMapper.readTree(response)
+        assertEquals(1, outcomes.size())
+        assertEquals(accountId, outcomes.first().path("accountId").asText())
+    }
+
+    @Test
+    fun `syncing an account that is not yours is a not-found, not someone else's sync`() {
+        authPost("/api/v1/messages/sync?accountId=${java.util.UUID.randomUUID()}")
+            .andExpect { status { isNotFound() } }
+            .andExpect { jsonPath("$.code") { value("account_not_found") } }
+    }
+
+    @Test
+    fun `reclassifying reports how many messages it looked at`() {
+        authPost("/api/v1/categories/reclassify")
+            .andExpect { status { isOk() } }
+            .andExpect { jsonPath("$.reclassified") { exists() } }
+    }
+
+    // ---- attachments -------------------------------------------------------
+
+    @Test
+    fun `an attachment with no remote content is a not-found rather than an empty file`() {
+        // The demo mailbox is seeded locally, so its attachments have metadata but nothing
+        // to fetch from a provider. Returning zero bytes with a 200 would look like a
+        // corrupt download; the client needs to be told there is nothing there.
+        val message = objectMapper.readTree(
+            authGet("/api/v1/messages?withAttachmentsOnly=true&size=1")
+                .andReturn().response.contentAsString,
+        ).path("items").first()
+
+        val detail = objectMapper.readTree(
+            authGet("/api/v1/messages/${message.path("id").asText()}")
+                .andReturn().response.contentAsString,
+        )
+        val attachmentId = detail.path("attachments").first().path("id").asText()
+
+        authGet("/api/v1/messages/${message.path("id").asText()}/attachments/$attachmentId")
+            .andExpect { status { isNotFound() } }
+    }
+
+    @Test
+    fun `an attachment id from another message is not found`() {
+        val messageId = objectMapper.readTree(
+            authGet("/api/v1/messages?size=1").andReturn().response.contentAsString,
+        ).path("items").first().path("id").asText()
+
+        authGet("/api/v1/messages/$messageId/attachments/${java.util.UUID.randomUUID()}")
+            .andExpect { status { isNotFound() } }
+            .andExpect { jsonPath("$.code") { value("attachment_not_found") } }
+    }
+
+    // ---- composing ---------------------------------------------------------
+
+    @Test
+    fun `composing from an account that is not yours is refused`() {
+        mockMvc.post("/api/v1/messages") {
+            header("Authorization", "Bearer $accessToken")
+            contentType = MediaType.APPLICATION_JSON
+            content = """
+                {"accountId":"${java.util.UUID.randomUUID()}",
+                 "to":[{"address":"someone@example.com"}],
+                 "subject":"Hello","bodyText":"Hi"}
+            """.trimIndent()
+        }
+            .andExpect { status { isNotFound() } }
+            .andExpect { jsonPath("$.code") { value("account_not_found") } }
+    }
+
+    @Test
+    fun `a reply keeps the threading headers that tie it to its conversation`() {
+        val original = objectMapper.readTree(
+            authGet("/api/v1/messages?size=50").andReturn().response.contentAsString,
+        ).path("items").first { it.path("threadId").asText() == "thread-design-review" }
+
+        val response = mockMvc.post("/api/v1/messages") {
+            header("Authorization", "Bearer $accessToken")
+            contentType = MediaType.APPLICATION_JSON
+            content = """
+                {"to":[{"address":"tom@northwind.example"}],
+                 "subject":"Re: Thursday's design review",
+                 "bodyText":"Agreed.",
+                 "threadId":"${original.path("threadId").asText()}",
+                 "inReplyToMessageId":"${original.path("id").asText()}"}
+            """.trimIndent()
+        }
+            .andExpect { status { isOk() } }
+            .andReturn().response.contentAsString
+
+        // The reply has to land in the same conversation, or the thread splits in two.
+        assertEquals(
+            original.path("threadId").asText(),
+            objectMapper.readTree(response).path("threadId").asText(),
+        )
+    }
+
+    @Test
+    fun `html in a composed message is sanitised before it is stored`() {
+        val response = mockMvc.post("/api/v1/messages") {
+            header("Authorization", "Bearer $accessToken")
+            contentType = MediaType.APPLICATION_JSON
+            content = """
+                {"to":[{"address":"someone@example.com"}],
+                 "subject":"With markup",
+                 "bodyText":"Hello",
+                 "bodyHtml":"<p>Hello</p><script>alert(1)</script>"}
+            """.trimIndent()
+        }
+            .andExpect { status { isOk() } }
+            .andReturn().response.contentAsString
+
+        val stored = objectMapper.readTree(response).path("bodyHtml").asText()
+        assertTrue(stored.contains("Hello"), stored)
+        assertFalse(stored.contains("script"), "a script tag must not survive into storage")
     }
 }
