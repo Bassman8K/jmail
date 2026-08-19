@@ -366,10 +366,19 @@ jobs:
           pattern: jmail-*
           path: artifacts
 
+      - name: Bundle the web app into a single file
+        # The web artifact is an unpacked site; uploaded as-is it scatters index.html, two
+        # .wasm blobs and the source map across the release page as separate downloads.
+        run: |
+          ( cd artifacts/jmail-web && zip -qr "$GITHUB_WORKSPACE/jmail-web-${GITHUB_REF_NAME}.zip" . )
+          rm -rf artifacts/jmail-web
+
       - name: Attach every build to the release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: |
+            artifacts/**/*
+            jmail-web-*.zip
           generate_release_notes: true
           body: |
             Download the build for your platform below.
@@ -381,6 +390,7 @@ jobs:
             | Linux | `.deb` (Debian, Ubuntu) or `.rpm` (Fedora, RHEL) |
             | Android | `.apk` to sideload, `.aab` for the Play Store |
             | iOS | simulator build; a device build needs your own signing identity |
+            | Web | `jmail-web-*.zip` to self-host, or use the hosted build linked in the README |
 
             Every desktop and mobile build needs the JMail backend running — see the README
             for `./run.sh`, which starts it with one command.
