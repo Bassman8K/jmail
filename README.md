@@ -53,11 +53,12 @@ Every release carries a build for each platform. Grab one from
 | **macOS** | `JMail-1.0.0.pkg` | Installer package |
 | **Windows** | `JMail-1.0.0.msi` | Standard installer, per-user |
 | **Windows** | `JMail-1.0.0.exe` | Portable installer |
-| **Linux** | `jmail_1.0.0.deb` | Debian, Ubuntu, Mint |
-| **Linux** | `jmail-1.0.0.rpm` | Fedora, RHEL, openSUSE |
-| **Android** | `composeApp-release.apk` | Sideload directly |
+| **Linux** | `jmail_1.0.0-1_amd64.deb` | Debian, Ubuntu, Mint |
+| **Linux** | `jmail-1.0.0-1.x86_64.rpm` | Fedora, RHEL, openSUSE |
+| **Android** | `composeApp-release-unsigned.apk` | Sideload directly; unsigned, so allow installs from unknown sources |
 | **Android** | `composeApp-release.aab` | For a Play Store upload |
 | **iOS** | `JMail-simulator.zip` | Simulator build — a device build needs your own Apple signing identity |
+| **Web** | `jmail-web-v1.0.0.zip` | The built site, to serve yourself — or just use the hosted build below |
 
 **Web:** [bassman8k.github.io/jmail](https://bassman8k.github.io/jmail) — published from
 `main` on every push.
