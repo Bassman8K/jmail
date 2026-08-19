@@ -156,21 +156,38 @@ jobs:
 
       - name: Install rpm tooling
         if: matrix.os == 'ubuntu-latest'
-        # Both variables matter on the Ubuntu 24.04 image: without them apt can stop on a
-        # dpkg config prompt or on needrestart's service-restart menu and hang until the
-        # job's six-hour ceiling. The timeout turns any remaining stall into a fast failure.
+        # jpackage shells out to rpmbuild for the .rpm; the Ubuntu image does not ship it.
+        #
+        # This step is allowed to fail. Unattended-upgrades runs on a fresh runner and holds
+        # the dpkg lock, and apt will wait on it forever -- one run sat here for 35 minutes
+        # before the job was cancelled. The variables keep dpkg and needrestart from opening
+        # a prompt nobody can answer, and the build step below drops to a .deb-only package
+        # if rpmbuild still is not there, so a bad apt day cannot block a release.
+        continue-on-error: true
+        timeout-minutes: 8
         env:
           DEBIAN_FRONTEND: noninteractive
           NEEDRESTART_MODE: a
-        timeout-minutes: 5
         run: |
-          sudo -E apt-get update -qq
-          sudo -E apt-get install -y -qq --no-install-recommends rpm fakeroot
+          sudo systemctl stop unattended-upgrades.service 2>/dev/null || true
+          for _ in $(seq 1 30); do
+            sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || break
+            echo "waiting for the dpkg lock…"
+            sleep 5
+          done
+          sudo -E apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=20
+          sudo -E apt-get install -y --no-install-recommends rpm fakeroot
 
       - name: Build the native installer
         # jpackage cannot cross-compile: each installer must be built on its own OS, which
         # is the whole reason this job is a matrix.
-        run: ./gradlew :composeApp:packageDistributionForCurrentOS --stacktrace
+        run: |
+          if [ "$RUNNER_OS" = Linux ] && ! command -v rpmbuild >/dev/null 2>&1; then
+            echo "::warning::rpmbuild is unavailable, packaging the .deb only"
+            ./gradlew :composeApp:packageDeb --stacktrace
+          else
+            ./gradlew :composeApp:packageDistributionForCurrentOS --stacktrace
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
