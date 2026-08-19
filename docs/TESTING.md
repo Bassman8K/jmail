@@ -124,10 +124,13 @@ Honest notes, so you are not hunting for things that were never built:
 ./run.sh test
 ```
 
-461 tests: unit tests, integration tests against a real PostgreSQL, the Exchange sign-in path
-against a real IMAP server, and Compose UI tests that drive the actual screens. Coverage is
-enforced at 80% of lines and the report opens at
-`build/reports/kover/html/index.html`.
+625 tests: unit tests, integration tests against a real PostgreSQL, the address-and-password
+sign-in path against a real IMAP server, message sending against a real SMTP server, and
+Compose UI tests that drive the actual screens.
+
+Coverage is enforced at 92% of lines and 70% of branches, over the code that has behaviour to
+assert — serialization models and framework wiring are excluded, with the reasoning next to
+the list in `build.gradle.kts`. The report opens at `build/reports/kover/html/index.html`.
 
 ## If something goes wrong
 

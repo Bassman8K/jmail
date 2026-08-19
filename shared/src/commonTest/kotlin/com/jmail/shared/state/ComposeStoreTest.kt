@@ -304,4 +304,170 @@ class ComposeStoreTest {
         store.forward(original)
         assertEquals("Forward", store.state.value.title)
     }
+
+    // ---- the recipient chips, field by field -------------------------------
+    //
+    // Cc and Bcc go through the same code as To but different state, and a copy-paste slip
+    // between them puts a Bcc recipient in the Cc line — a privacy failure, not a typo.
+
+    @Test
+    fun cc_and_bcc_commit_into_their_own_fields() {
+        val store = store()
+
+        store.updateCcInput("carol@example.com")
+        store.commitRecipient(ComposeStore.RecipientField.CC)
+        store.updateBccInput("dan@example.com")
+        store.commitRecipient(ComposeStore.RecipientField.BCC)
+
+        assertEquals(listOf("carol@example.com"), store.state.value.cc.map { it.address })
+        assertEquals(listOf("dan@example.com"), store.state.value.bcc.map { it.address })
+        assertTrue(store.state.value.to.isEmpty())
+    }
+
+    @Test
+    fun a_separator_commits_in_cc_and_bcc_too() {
+        val store = store()
+
+        store.updateCcInput("carol@example.com,")
+        store.updateBccInput("dan@example.com;")
+
+        assertEquals(listOf("carol@example.com"), store.state.value.cc.map { it.address })
+        assertEquals(listOf("dan@example.com"), store.state.value.bcc.map { it.address })
+        // The input clears once the chip is made, or the address is sent twice.
+        assertEquals("", store.state.value.ccInput)
+        assertEquals("", store.state.value.bccInput)
+    }
+
+    @Test
+    fun a_recipient_can_be_removed_from_cc_and_bcc() {
+        val store = store()
+        store.updateCcInput("carol@example.com,")
+        store.updateBccInput("dan@example.com,")
+
+        store.removeRecipient(ComposeStore.RecipientField.CC, "carol@example.com")
+        store.removeRecipient(ComposeStore.RecipientField.BCC, "dan@example.com")
+
+        assertTrue(store.state.value.cc.isEmpty())
+        assertTrue(store.state.value.bcc.isEmpty())
+    }
+
+    @Test
+    fun addresses_are_lowercased_so_the_same_person_is_one_chip() {
+        val store = store()
+
+        store.updateToInput("Ada@Example.COM,")
+        store.updateToInput("ada@example.com,")
+
+        assertEquals(listOf("ada@example.com"), store.state.value.to.map { it.address })
+    }
+
+    @Test
+    fun a_trailing_space_commits_the_address_as_well() {
+        val store = store()
+
+        store.updateToInput("ada@example.com ")
+
+        assertEquals(listOf("ada@example.com"), store.state.value.to.map { it.address })
+    }
+
+    @Test
+    fun a_lone_separator_does_not_create_an_empty_chip() {
+        val store = store()
+
+        store.updateToInput(",")
+        store.updateToInput("  ")
+
+        assertTrue(store.state.value.to.isEmpty())
+        assertTrue(store.state.value.fieldErrors.isEmpty())
+    }
+
+    @Test
+    fun committing_an_empty_field_is_a_no_op_rather_than_an_error() {
+        val store = store()
+
+        store.commitRecipient(ComposeStore.RecipientField.TO)
+        store.commitRecipient(ComposeStore.RecipientField.CC)
+        store.commitRecipient(ComposeStore.RecipientField.BCC)
+
+        assertTrue(store.state.value.to.isEmpty())
+        assertTrue(store.state.value.fieldErrors.isEmpty())
+    }
+
+    @Test
+    fun an_implausible_cc_address_is_reported_against_the_cc_field() {
+        val store = store()
+
+        store.updateCcInput("not-an-address")
+        store.commitRecipient(ComposeStore.RecipientField.CC)
+
+        // Reported against cc, not to, or the error appears under the wrong box.
+        assertTrue(store.state.value.fieldErrors.containsKey("cc"), store.state.value.fieldErrors.toString())
+        assertTrue(store.state.value.cc.isEmpty())
+    }
+
+    @Test
+    fun uncommitted_cc_and_bcc_are_still_committed_when_sending() = runTest {
+        // Typed but never confirmed with Enter is still meant to go, the same reason the To
+        // field commits pending input. The send is made to fail so the draft stays on screen
+        // and the committed chips can be inspected — a successful send clears the composer.
+        val store = store(
+            mapOf("/messages" to ("""{"code":"provider_error","message":"nope"}""" to HttpStatusCode.BadGateway)),
+        )
+        store.updateToInput("ada@example.com,")
+        store.updateCcInput("carol@example.com")
+        store.updateBccInput("dan@example.com")
+        store.updateBody("Hello")
+
+        store.send()
+        settle()
+
+        assertEquals(listOf("carol@example.com"), store.state.value.cc.map { it.address })
+        assertEquals(listOf("dan@example.com"), store.state.value.bcc.map { it.address })
+    }
+
+    // ---- small toggles -----------------------------------------------------
+
+    @Test
+    fun the_cc_and_bcc_row_can_be_shown_and_hidden() {
+        val store = store()
+        assertFalse(store.state.value.showCcBcc)
+
+        store.toggleCcBcc()
+        assertTrue(store.state.value.showCcBcc)
+
+        store.toggleCcBcc()
+        assertFalse(store.state.value.showCcBcc)
+    }
+
+    @Test
+    fun the_sending_account_can_be_chosen() {
+        val store = store()
+
+        store.setAccount("acc-2")
+
+        assertEquals("acc-2", store.state.value.accountId)
+    }
+
+    @Test
+    fun the_subject_can_be_edited() {
+        val store = store()
+
+        store.updateSubject("A new subject")
+
+        assertEquals("A new subject", store.state.value.subject)
+    }
+
+    @Test
+    fun an_error_can_be_dismissed_without_losing_the_draft() {
+        val store = store()
+        store.updateBody("Half-written thought")
+        store.updateToInput("not-an-address")
+        store.commitRecipient(ComposeStore.RecipientField.TO)
+
+        store.dismissError()
+
+        assertNull(store.state.value.error)
+        // The draft itself must survive; losing it is what people never forgive.
+        assertEquals("Half-written thought", store.state.value.body)
+    }
 }

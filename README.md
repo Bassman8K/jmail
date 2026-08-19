@@ -13,7 +13,7 @@ One codebase: **desktop · web · Android · iOS**
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.1.0-7F52FF.svg?logo=kotlin&logoColor=white)](https://kotlinlang.org)
 [![Tests](https://img.shields.io/badge/tests-484%20passing-brightgreen.svg)](#testing)
-[![Coverage](https://img.shields.io/badge/line%20coverage-87%25-brightgreen.svg)](#testing)
+[![Coverage](https://img.shields.io/badge/line%20coverage-94%25-brightgreen.svg)](#testing)
 
 </div>
 
@@ -186,17 +186,22 @@ The design decisions, and the seams that would need attention at scale, are writ
 ./run.sh test
 ```
 
-**484 tests**, all passing:
+**625 tests**, all passing:
 
 | Suite | Count | What it covers |
 |---|---|---|
-| Backend | 317 | Units, plus integration against real PostgreSQL and a real IMAP server |
-| Shared | 124 | API client, repositories, state holders |
+| Backend | 418 | Units, plus integration against real PostgreSQL and a real IMAP and SMTP server |
+| Shared | 164 | API client, repositories, state holders, the desktop session file |
 | UI | 43 | Compose UI tests that drive the actual screens |
 
-Line coverage is enforced at **80%** by `koverVerify` (currently 87%); the report lands in
-`build/reports/kover/html/index.html`. Branch coverage is held to a lower bar on purpose —
-the reasoning is in `build.gradle.kts`.
+Line coverage is enforced at **92%** by `koverVerify` (currently 94.3%), branch coverage at
+**70%** (currently 74.3%); the report lands in `build/reports/kover/html/index.html`.
+
+Coverage is measured over code that has behaviour to assert. Serialization models and
+framework wiring are excluded — see the annotated list in `build.gradle.kts`. Leaving them
+in made the branch figure a report on the Kotlin compiler's generated `equals`, `hashCode`
+and `copy` rather than on JMail: they accounted for 781 of 1,263 uncovered branches while
+contributing 41 uncovered lines.
 
 The integration tests use whichever PostgreSQL is available: an explicit `JMAIL_TEST_DB_URL`,
 the local `docker compose` stack, or a Testcontainers instance — so they run the same way on

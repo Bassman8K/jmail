@@ -12,6 +12,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -369,5 +371,195 @@ class MailboxStoreTest {
 
         store.dismissStatus()
         assertNull(store.state.value.statusMessage)
+    }
+
+    // ---- the other destructive actions, and undo ---------------------------
+    //
+    // Archive, Trash and Spam share one code path but mean different things to the user and
+    // undo differently. A wrong label on the snackbar, or an undo that restores the wrong
+    // way, is the kind of thing only a test for each one catches.
+
+    @Test
+    fun trashing_removes_the_row_and_says_so() = runTest {
+        val store = store(defaultRoutes + okAction)
+        store.start()
+        awaitUntil { store.state.value.messages.size == 3 }
+
+        store.trash(listOf("m2"))
+
+        assertEquals(listOf("m1", "m3"), store.state.value.messages.map(MessageSummary::id))
+        assertEquals(UndoableAction.Kind.TRASH, store.state.value.undo?.kind)
+        assertEquals("Moved to Trash", store.state.value.undo?.label)
+    }
+
+    @Test
+    fun trashing_several_messages_counts_them_in_the_label() = runTest {
+        val store = store(defaultRoutes + okAction)
+        store.start()
+        awaitUntil { store.state.value.messages.size == 3 }
+
+        store.trash(listOf("m1", "m2"))
+
+        assertEquals("Moved 2 to Trash", store.state.value.undo?.label)
+        assertEquals(listOf("m3"), store.state.value.messages.map(MessageSummary::id))
+    }
+
+    @Test
+    fun archiving_several_messages_counts_them_too() = runTest {
+        val store = store(defaultRoutes + okAction)
+        store.start()
+        awaitUntil { store.state.value.messages.size == 3 }
+
+        store.archive(listOf("m1", "m3"))
+
+        assertEquals("Archived 2 messages", store.state.value.undo?.label)
+    }
+
+    @Test
+    fun reporting_spam_removes_the_row_and_offers_an_undo() = runTest {
+        val store = store(defaultRoutes + okAction)
+        store.start()
+        awaitUntil { store.state.value.messages.size == 3 }
+
+        store.markSpam(listOf("m3"))
+
+        assertEquals(listOf("m1", "m2"), store.state.value.messages.map(MessageSummary::id))
+        assertEquals(UndoableAction.Kind.SPAM, store.state.value.undo?.kind)
+        assertEquals("Reported as spam", store.state.value.undo?.label)
+    }
+
+    @Test
+    fun an_empty_selection_does_nothing_at_all() = runTest {
+        val store = store(defaultRoutes + okAction)
+        store.start()
+        awaitUntil { store.state.value.messages.size == 3 }
+
+        store.archive(emptyList())
+        store.trash(emptyList())
+        store.markSpam(emptyList())
+        store.assignCategory(emptyList(), "cat-1")
+
+        assertEquals(3, store.state.value.messages.size)
+        assertNull(store.state.value.undo)
+    }
+
+    @Test
+    fun undo_puts_the_message_back_and_clears_the_offer() = runTest {
+        val store = store(defaultRoutes + okAction)
+        store.start()
+        awaitUntil { store.state.value.messages.size == 3 }
+        store.trash(listOf("m2"))
+        assertNotNull(store.state.value.undo)
+
+        store.undo()
+        awaitUntil(describe = { "the undo to complete" }) { store.state.value.undo == null }
+
+        assertEquals("Undone", store.state.value.statusMessage)
+        // The list is reloaded from the server, which is what actually restores the row.
+        awaitUntil { store.state.value.messages.size == 3 }
+    }
+
+    @Test
+    fun undoing_an_archive_takes_the_other_route_back() = runTest {
+        val store = store(defaultRoutes + okAction)
+        store.start()
+        awaitUntil { store.state.value.messages.size == 3 }
+        store.archive(listOf("m2"))
+
+        store.undo()
+        awaitUntil(describe = { "the undo to complete" }) { store.state.value.undo == null }
+
+        assertEquals("Undone", store.state.value.statusMessage)
+    }
+
+    @Test
+    fun undo_with_nothing_to_undo_is_a_no_op() = runTest {
+        val store = store(defaultRoutes + okAction)
+        store.start()
+        awaitUntil { store.state.value.messages.size == 3 }
+
+        store.undo()
+
+        assertNull(store.state.value.undo)
+        assertEquals(3, store.state.value.messages.size)
+    }
+
+    @Test
+    fun dismissing_the_undo_offer_keeps_the_action() = runTest {
+        val store = store(defaultRoutes + okAction)
+        store.start()
+        awaitUntil { store.state.value.messages.size == 3 }
+        store.archive(listOf("m2"))
+
+        store.dismissUndo()
+
+        assertNull(store.state.value.undo)
+        // Dismissing the offer is not undoing it: the row stays gone.
+        assertEquals(listOf("m1", "m3"), store.state.value.messages.map(MessageSummary::id))
+    }
+
+    // ---- navigation and filters -------------------------------------------
+
+    @Test
+    fun choosing_a_folder_clears_the_search_and_the_category() = runTest {
+        val requests = MutableStateFlow(emptyList<String>())
+        val store = store(defaultRoutes, onRequest = { request -> requests.update { it + request } })
+        store.start()
+        awaitUntil { store.state.value.messages.size == 3 }
+
+        store.selectCategory("cat-1")
+        awaitUntil { store.state.value.query.categoryId == "cat-1" }
+
+        store.selectFolder("SENT", folderId = "fol-9")
+
+        assertEquals("SENT", store.state.value.query.folderType)
+        assertEquals("fol-9", store.state.value.query.folderId)
+        // Leaving either behind means the folder shows a filtered subset with no sign why.
+        assertNull(store.state.value.query.categoryId)
+        assertNull(store.state.value.query.searchQuery)
+    }
+
+    @Test
+    fun the_starred_filter_toggles_both_ways() = runTest {
+        val store = store()
+        store.start()
+        awaitUntil { store.state.value.messages.size == 3 }
+
+        store.toggleStarredOnly()
+        awaitUntil { store.state.value.query.starredOnly }
+
+        store.toggleStarredOnly()
+        awaitUntil { !store.state.value.query.starredOnly }
+    }
+
+    @Test
+    fun closing_a_message_clears_the_selection() = runTest {
+        val store = store(defaultRoutes + okAction)
+        store.start()
+        awaitUntil { store.state.value.messages.size == 3 }
+
+        store.openMessage("m1")
+        assertEquals("m1", store.state.value.selectedMessageId)
+
+        store.closeMessage()
+
+        assertNull(store.state.value.selectedMessageId)
+    }
+
+    @Test
+    fun opening_a_message_that_is_already_read_does_not_call_the_server_again() = runTest {
+        val requests = MutableStateFlow(emptyList<String>())
+        val store = store(
+            defaultRoutes + ("/messages?" to (messagesPageJson("m1", unread = false) to HttpStatusCode.OK)) + okAction,
+            onRequest = { request -> requests.update { it + request } },
+        )
+        store.start()
+        awaitUntil { store.state.value.messages.size == 1 }
+        val before = requests.value.size
+
+        store.openMessage("m1")
+
+        assertEquals("m1", store.state.value.selectedMessageId)
+        assertEquals(before, requests.value.size)
     }
 }

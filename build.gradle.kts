@@ -71,6 +71,16 @@ kover {
                         "com.jmail.backend.JMailApplicationKt",
                         "com.jmail.backend.config.*",
                         "com.jmail.backend.*.dto.*",
+
+                        // The shared wire models, for the same reason as the backend DTOs
+                        // above: they are `@Serializable` data classes with no behaviour.
+                        // Measuring them means measuring compiler-generated equals, hashCode,
+                        // copy and write$Self — 781 of the 1,263 uncovered branches in this
+                        // report came from there, against 41 uncovered lines, which made the
+                        // branch figure describe the Kotlin compiler rather than JMail. The
+                        // one member with real logic, MessageSummary.isLowConfidence, is
+                        // asserted directly by ModelsTest, which still runs.
+                        "com.jmail.shared.model.*",
                         "com.jmail.shared.generated.*",
                         "jmail.composeapp.generated.resources.*",
 
