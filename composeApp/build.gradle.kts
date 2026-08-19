@@ -47,11 +47,17 @@ if (androidEnabled) {
 
         // A checked-in debug keystore is deliberately avoided; release builds are signed from
         // environment variables so CI can publish without secrets living in the repository.
-        signingConfigs {
-            create("release") {
-                val storePath = System.getenv("JMAIL_ANDROID_KEYSTORE")
-                if (storePath != null && File(storePath).exists()) {
-                    storeFile = File(storePath)
+        // The config is only *created* when a keystore is actually there -- an empty one is
+        // rejected at packaging time with "missing required property storeFile", so a public
+        // build with no signing secrets has to produce an unsigned APK instead.
+        val releaseKeystore = System.getenv("JMAIL_ANDROID_KEYSTORE")
+            ?.let(::File)
+            ?.takeIf { it.exists() }
+
+        if (releaseKeystore != null) {
+            signingConfigs {
+                create("release") {
+                    storeFile = releaseKeystore
                     storePassword = System.getenv("JMAIL_ANDROID_KEYSTORE_PASSWORD")
                     keyAlias = System.getenv("JMAIL_ANDROID_KEY_ALIAS")
                     keyPassword = System.getenv("JMAIL_ANDROID_KEY_PASSWORD")
@@ -67,7 +73,7 @@ if (androidEnabled) {
                     getDefaultProguardFile("proguard-android-optimize.txt"),
                     file("proguard-rules.pro"),
                 )
-                if (System.getenv("JMAIL_ANDROID_KEYSTORE") != null) {
+                if (releaseKeystore != null) {
                     signingConfig = signingConfigs.getByName("release")
                 }
             }
@@ -92,6 +98,17 @@ if (androidEnabled) {
         buildFeatures {
             compose = true
             buildConfig = true
+        }
+
+        testOptions {
+            unitTests.all { test ->
+                // Compose UI tests need a real Android runtime -- a device, an emulator, or
+                // Robolectric. Against the stubbed android.jar that unit tests compile with,
+                // `android.os.Build.FINGERPRINT` is null and every `runComposeUiTest` dies
+                // there before reaching an assertion. The very same sources do run, for real,
+                // on the JVM through `:composeApp:desktopTest`, so nothing goes uncovered.
+                test.exclude("**/*UiTest*")
+            }
         }
     }
 }

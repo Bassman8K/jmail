@@ -294,6 +294,10 @@ class MailboxStoreTest {
         awaitUntil { store.state.value.messages.size == 3 }
 
         store.syncNow()
+        // syncNow() only launches the work, so waiting for `!isSyncing` on its own passes
+        // instantly on the state that has not started syncing yet. Wait for the flag to go up
+        // first; the summary is written in the same atomic update that clears it.
+        awaitUntil(describe = { "the sync to start" }) { store.state.value.isSyncing }
         awaitUntil(describe = { "the sync summary" }) { !store.state.value.isSyncing }
 
         assertEquals("2 new messages", store.state.value.statusMessage)
@@ -313,7 +317,8 @@ class MailboxStoreTest {
         awaitUntil { store.state.value.messages.size == 3 }
 
         store.syncNow()
-        awaitUntil { !store.state.value.isSyncing }
+        awaitUntil(describe = { "the sync to start" }) { store.state.value.isSyncing }
+        awaitUntil(describe = { "the sync to finish" }) { !store.state.value.isSyncing }
 
         assertEquals("No new mail", store.state.value.statusMessage)
     }

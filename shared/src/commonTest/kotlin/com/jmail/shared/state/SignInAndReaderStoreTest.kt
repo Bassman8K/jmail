@@ -18,6 +18,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.runTest
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -30,7 +32,12 @@ import kotlin.test.assertTrue
 class SignInStoreTest {
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
-    private val openedUrls = mutableListOf<String>()
+    // The store's callbacks run on whichever thread the HTTP client dispatched on, so
+    // recorded values are replaced atomically rather than appended in place. Iterating a
+    // plain MutableList while it grows throws ConcurrentModificationException, which showed
+    // up as a spurious "timed out waiting for condition" on a loaded CI machine.
+    private val opened = MutableStateFlow(emptyList<String>())
+    private val openedUrls: List<String> get() = opened.value
 
     @AfterTest
     fun tearDown() = scope.cancel()
@@ -63,7 +70,7 @@ class SignInStoreTest {
         return SignInStore(
             SessionRepository(api, storage),
             scope,
-            openUrl = { openedUrls += it },
+            openUrl = { url -> opened.update { it + url } },
             clientTarget = clientTarget,
         )
     }
@@ -214,7 +221,7 @@ class SignInStoreTest {
 
     @Test
     fun a_browser_build_asks_for_a_callback_it_can_actually_receive() = runTest {
-        val requests = mutableListOf<String>()
+        val requests = MutableStateFlow(emptyList<String>())
         val store = store(
             mapOf(
                 "/auth/providers" to (providersJson to HttpStatusCode.OK),
@@ -224,7 +231,7 @@ class SignInStoreTest {
                     ),
             ),
             clientTarget = "WEB",
-            onRequest = { requests += it },
+            onRequest = { request -> requests.update { it + request } },
         )
         store.start()
         awaitUntil { store.state.value.providers.isNotEmpty() }
@@ -233,18 +240,18 @@ class SignInStoreTest {
             ProviderSummary(AccountProvider.GOOGLE, "Continue with Google", SignInKind.OAUTH, "google"),
         )
         awaitUntil(describe = { "the authorization request" }) {
-            requests.any { it.contains("/start") }
+            requests.value.any { it.contains("/start") }
         }
 
         // Asking for the APP target from a browser strands the user at a jmail:// link the
         // browser cannot open — which is exactly what used to happen.
-        val startRequest = requests.first { it.contains("/start") }
+        val startRequest = requests.value.first { it.contains("/start") }
         assertTrue(startRequest.contains("target=WEB"), startRequest)
     }
 
     @Test
     fun an_installed_build_asks_for_the_deep_link_callback() = runTest {
-        val requests = mutableListOf<String>()
+        val requests = MutableStateFlow(emptyList<String>())
         val store = store(
             mapOf(
                 "/auth/providers" to (providersJson to HttpStatusCode.OK),
@@ -254,7 +261,7 @@ class SignInStoreTest {
                     ),
             ),
             clientTarget = "APP",
-            onRequest = { requests += it },
+            onRequest = { request -> requests.update { it + request } },
         )
         store.start()
         awaitUntil { store.state.value.providers.isNotEmpty() }
@@ -262,9 +269,9 @@ class SignInStoreTest {
         store.chooseProvider(
             ProviderSummary(AccountProvider.GOOGLE, "Continue with Google", SignInKind.OAUTH, "google"),
         )
-        awaitUntil { requests.any { it.contains("/start") } }
+        awaitUntil { requests.value.any { it.contains("/start") } }
 
-        assertTrue(requests.first { it.contains("/start") }.contains("target=APP"))
+        assertTrue(requests.value.first { it.contains("/start") }.contains("target=APP"))
     }
 
     @Test
@@ -346,7 +353,7 @@ class SignInStoreTest {
             tokenStorage = storage,
         )
         val session = SessionRepository(api, storage)
-        val store = SignInStore(session, scope, openUrl = { openedUrls += it })
+        val store = SignInStore(session, scope, openUrl = { url -> opened.update { it + url } })
 
         store.signInAsDemo()
         awaitUntil(describe = { "the demo session" }) { session.sessionState.value is SessionState.SignedIn }

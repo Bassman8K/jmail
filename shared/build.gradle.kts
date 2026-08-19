@@ -104,10 +104,11 @@ kotlin {
         }
 
         if (iosEnabled) {
-            val iosMain by getting {
-                dependencies {
-                    implementation(libs.ktor.client.darwin)
-                }
+            // `iosMain` is an intermediate source set created by the default hierarchy
+            // template, not by a target, so it does not exist yet when this block runs --
+            // `by getting` fails on it. The generated accessor resolves it lazily instead.
+            iosMain.dependencies {
+                implementation(libs.ktor.client.darwin)
             }
         }
     }
