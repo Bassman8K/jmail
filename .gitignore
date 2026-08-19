@@ -30,6 +30,8 @@ node_modules/
 kotlin-js-store/
 
 # Xcode
+# Rendered by :composeApp:generateIosAppIcon (gitignore has no trailing comments).
+iosApp/iosApp/Assets.xcassets/AppIcon.appiconset/
 iosApp/build/
 iosApp/DerivedData/
 xcuserdata/

@@ -36,6 +36,8 @@ require_xcodegen() {
 generate() {
   require_macos
   require_xcodegen
+  step "Rendering the app icon into the asset catalog"
+  ./gradlew :composeApp:generateIosAppIcon --quiet --console=plain
   step "Generating $PROJECT from project.yml"
   (cd "$PROJECT_DIR" && xcodegen generate)
   ok "Generated $PROJECT"

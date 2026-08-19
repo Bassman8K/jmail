@@ -320,6 +320,46 @@ val generateAppIcons by tasks.registering {
     }
 }
 
+/**
+ * Writes the iOS app icon into the asset catalog before Xcode compiles it.
+ *
+ * Same reasoning as `generateAppIcons`: the artwork is code, so a clean checkout builds
+ * without any image tooling and no binary blob is committed. The appiconset is gitignored.
+ * A single 1024x1024 universal image is all Xcode 13 and newer need.
+ */
+val generateIosAppIcon by tasks.registering {
+    group = "distribution"
+    description = "Writes AppIcon.appiconset into the iOS asset catalog."
+
+    val appIconSet = rootProject.layout.projectDirectory
+        .dir("iosApp/iosApp/Assets.xcassets/AppIcon.appiconset")
+    outputs.dir(appIconSet)
+
+    doLast {
+        val dir = appIconSet.asFile.apply { mkdirs() }
+        dir.resolve("JMail-1024.png").writeBytes(JMailIconRenderer.renderIosAppIconPng(1024))
+        dir.resolve("Contents.json").writeText(
+            """
+            {
+              "images" : [
+                {
+                  "filename" : "JMail-1024.png",
+                  "idiom" : "universal",
+                  "platform" : "ios",
+                  "size" : "1024x1024"
+                }
+              ],
+              "info" : {
+                "author" : "gradle",
+                "version" : 1
+              }
+            }
+            """.trimIndent() + "\n",
+        )
+        logger.lifecycle("Wrote the iOS app icon to ${dir.absolutePath}")
+    }
+}
+
 tasks.matching { it.name.startsWith("package") || it.name.startsWith("createDistributable") }
     .configureEach {
         dependsOn(generateAppIcons)

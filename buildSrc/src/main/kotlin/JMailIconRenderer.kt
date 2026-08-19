@@ -28,10 +28,20 @@ object JMailIconRenderer {
     /** Sizes rendered once and reused by every container format. */
     val sizes = listOf(16, 32, 64, 128, 256, 512, 1024)
 
-    fun renderPng(size: Int): ByteArray {
+    fun renderPng(size: Int): ByteArray = renderPng(size, rounded = true)
+
+    /**
+     * The iOS app icon, which has to be a fully opaque square: iOS applies its own corner
+     * mask, and an icon carrying an alpha channel is rejected. So the artwork runs edge to
+     * edge here rather than being rounded off like the desktop icon.
+     */
+    fun renderIosAppIconPng(size: Int): ByteArray = renderPng(size, rounded = false)
+
+    private fun renderPng(size: Int, rounded: Boolean): ByteArray {
         require(size > 0) { "Icon size must be positive, was $size" }
 
-        val image = BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB)
+        val type = if (rounded) BufferedImage.TYPE_INT_ARGB else BufferedImage.TYPE_INT_RGB
+        val image = BufferedImage(size, size, type)
         val g = image.createGraphics()
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
         g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
@@ -39,8 +49,8 @@ object JMailIconRenderer {
 
         val s = size.toFloat()
 
-        // Squircle-ish background with the brand gradient.
-        val corner = s * 0.45f
+        // Squircle-ish background with the brand gradient — square when iOS will mask it.
+        val corner = if (rounded) s * 0.45f else 0f
         g.paint = GradientPaint(0f, 0f, brandStart, s, s, brandEnd)
         g.fill(RoundRectangle2D.Float(0f, 0f, s, s, corner, corner))
 
