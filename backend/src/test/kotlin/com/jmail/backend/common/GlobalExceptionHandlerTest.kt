@@ -32,6 +32,7 @@ import org.springframework.web.HttpMediaTypeNotSupportedException
 import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.servlet.NoHandlerFoundException
+import org.springframework.web.servlet.resource.NoResourceFoundException
 
 /**
  * The contract every client depends on: one shape of error body, a stable `code` to branch
@@ -272,6 +273,21 @@ class GlobalExceptionHandlerTest {
         assertThat(response.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
         assertThat(response.error().code).isEqualTo("endpoint_not_found")
         assertThat(response.error().message).contains("/api/v1/nope")
+    }
+
+    @Test
+    fun `an unknown url is 404, not 500`() {
+        // Spring 6 hands an unmatched URL to the static-resource handler, so this — not
+        // NoHandlerFoundException — is what an API 404 actually raises. Found by curling a
+        // route that had just been deleted and getting "something went wrong on our side".
+        val response = handler.handleNoResource(
+            NoResourceFoundException(HttpMethod.GET, "/api/v1/auth/mail-providers"),
+            request,
+        )
+
+        assertThat(response.statusCode).isEqualTo(HttpStatus.NOT_FOUND)
+        assertThat(response.error().code).isEqualTo("endpoint_not_found")
+        assertThat(response.error().message).contains("/api/v1/messages/42")
     }
 
     @Test

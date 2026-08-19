@@ -248,6 +248,13 @@ class AuthApiIntegrationTest : AbstractIntegrationTest() {
     }
 
     @Test
+    fun `an unknown api url is a 404 the client can read`() {
+        mockMvc.get("/api/v1/auth/no-such-endpoint")
+            .andExpect { status { isNotFound() } }
+            .andExpect { jsonPath("$.code") { value("endpoint_not_found") } }
+    }
+
+    @Test
     fun `health and docs stay reachable without a token`() {
         mockMvc.get("/actuator/health").andExpect { status { isOk() } }
         mockMvc.get("/v3/api-docs").andExpect { status { isOk() } }

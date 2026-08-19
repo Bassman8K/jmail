@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 import org.springframework.web.servlet.NoHandlerFoundException
+import org.springframework.web.servlet.resource.NoResourceFoundException
 import java.time.Instant
 
 @Schema(description = "Uniform error payload returned by every JMail endpoint")
@@ -229,6 +230,25 @@ class GlobalExceptionHandler {
         ApiErrorResponse(
             code = "endpoint_not_found",
             message = "No endpoint matches ${exception.httpMethod} ${exception.requestURL}",
+            path = request.requestURI,
+        ),
+    )
+
+    /**
+     * Spring 6 routes an unmatched URL to the static-resource handler, which raises this
+     * rather than [NoHandlerFoundException]. Without a handler for it, *every* 404 on the
+     * API came back as `500 internal_error` with a stack trace logged at ERROR — so a
+     * client could not tell a wrong URL from a broken server, and the log filled with
+     * alarming entries for what is usually a typo.
+     */
+    @ExceptionHandler(NoResourceFoundException::class)
+    fun handleNoResource(
+        exception: NoResourceFoundException,
+        request: HttpServletRequest,
+    ): ResponseEntity<ApiErrorResponse> = ResponseEntity.status(HttpStatus.NOT_FOUND).body(
+        ApiErrorResponse(
+            code = "endpoint_not_found",
+            message = "No endpoint matches ${request.method} ${request.requestURI}",
             path = request.requestURI,
         ),
     )
