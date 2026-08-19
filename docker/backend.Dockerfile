@@ -39,7 +39,10 @@ EXPOSE 8080
 
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseSerialGC -Djava.security.egd=file:/dev/./urandom"
 
+# 127.0.0.1, not localhost: inside the container localhost resolves to ::1 first, and
+# these servers listen on IPv4 only — so the check fails against a server that is
+# serving perfectly. The web container sat "unhealthy" through 247 consecutive checks.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
-  CMD wget -qO- http://localhost:8080/actuator/health/readiness || exit 1
+  CMD wget -qO- http://127.0.0.1:8080/actuator/health/readiness || exit 1
 
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]
