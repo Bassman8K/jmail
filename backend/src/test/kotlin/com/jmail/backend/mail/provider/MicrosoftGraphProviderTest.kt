@@ -3,6 +3,7 @@ package com.jmail.backend.mail.provider
 import assertk.assertThat
 import assertk.assertions.contains
 import assertk.assertions.containsExactly
+import assertk.assertions.isEmpty
 import assertk.assertions.isEqualTo
 import assertk.assertions.isFalse
 import assertk.assertions.isNotNull
@@ -22,6 +23,8 @@ import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.test.web.client.MockRestServiceServer
+import org.springframework.test.web.client.match.MockRestRequestMatchers.content
+import org.springframework.test.web.client.match.MockRestRequestMatchers.header
 import org.springframework.test.web.client.match.MockRestRequestMatchers.method
 import org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo
 import org.springframework.test.web.client.response.MockRestResponseCreators.withStatus
@@ -217,5 +220,190 @@ class MicrosoftGraphProviderTest {
             .andRespond(withStatus(HttpStatus.FORBIDDEN))
 
         assertThrows<ReauthenticationRequiredException> { provider.listFolders(account) }
+    }
+
+    // ---- listing a page ----------------------------------------------------
+
+    private fun graphMessage(id: String, subject: String) = """
+        {"id":"$id","conversationId":"c-$id","subject":"$subject",
+         "receivedDateTime":"2026-01-02T03:04:05Z","sentDateTime":"2026-01-02T03:04:00Z",
+         "isRead":false,"flag":{"flagStatus":"notFlagged"},"hasAttachments":false,
+         "from":{"emailAddress":{"address":"grace@example.com","name":"Grace"}},
+         "toRecipients":[{"emailAddress":{"address":"ada@example.com"}}],
+         "body":{"contentType":"text","content":"Body of $id"}}
+    """.trimIndent()
+
+    @Test
+    fun `a page is listed in one request, unlike Gmail`() {
+        // Graph returns whole messages in the listing, so a page is one round trip. The
+        // $select list is what keeps it that way; dropping `body` silently empties every
+        // message, which reads as a sync bug rather than a query one.
+        var requestedUri: String? = null
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/mailFolders/inbox-id/messages")))
+            .andExpect(method(HttpMethod.GET))
+            .andExpect(header("Authorization", "Bearer graph-access-token"))
+            .andExpect { request -> requestedUri = request.uri.toString() }
+            .andRespond(
+                withSuccess(
+                    """{"value":[${graphMessage("m1", "First")},${graphMessage("m2", "Second")}],
+                        "@odata.nextLink":"https://graph.microsoft.com/next"}""",
+                    MediaType.APPLICATION_JSON,
+                ),
+            )
+
+        val page = provider.fetchMessages(account, inbox, limit = 2)
+
+        assertThat(page.messages.map { it.subject }).containsExactly("First", "Second")
+        assertThat(page.nextCursor).isEqualTo("https://graph.microsoft.com/next")
+        assertThat(requestedUri!!).contains("\$top=2")
+        assertThat(requestedUri!!).contains("body")
+        // A single %20, not %2520: the URI is pre-encoded and must not be encoded again,
+        // or $orderby arrives as literal "receivedDateTime%20desc" and Graph rejects it.
+        assertThat(requestedUri!!).contains("\$orderby=receivedDateTime%20desc")
+        server.verify()
+    }
+
+    @Test
+    fun `an incremental sync filters on the timestamp rather than re-reading everything`() {
+        var requestedUri: String? = null
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/messages")))
+            .andExpect { request -> requestedUri = request.uri.toString() }
+            .andRespond(withSuccess("""{"value":[]}""", MediaType.APPLICATION_JSON))
+
+        provider.fetchMessages(account, inbox, since = Instant.parse("2026-01-01T00:00:00Z"), limit = 5)
+
+        assertThat(requestedUri!!).contains("2026-01-01T00:00:00Z")
+        server.verify()
+    }
+
+    @Test
+    fun `a cursor is followed verbatim, because Graph signs its own next link`() {
+        // Rebuilding the query instead of following @odata.nextLink loses the skip token
+        // and re-reads page one forever.
+        server.expect(requestTo("https://graph.microsoft.com/next-page-token"))
+            .andRespond(withSuccess("""{"value":[]}""", MediaType.APPLICATION_JSON))
+
+        val page = provider.fetchMessages(
+            account,
+            inbox,
+            cursor = "https://graph.microsoft.com/next-page-token",
+            limit = 10,
+        )
+
+        assertThat(page.messages).isEmpty()
+        assertThat(page.nextCursor).isNull()
+        server.verify()
+    }
+
+    @Test
+    fun `one unreadable message does not stall the page`() {
+        server.expect(requestTo(org.hamcrest.Matchers.containsString("/messages?")))
+            .andRespond(
+                withSuccess(
+                    """{"value":[${graphMessage("m1", "Fine")},{"id":"broken","body":12345}]}""",
+                    MediaType.APPLICATION_JSON,
+                ),
+            )
+
+        val page = provider.fetchMessages(account, inbox, limit = 2)
+
+        assertThat(page.messages.map { it.subject }).contains("Fine")
+    }
+
+    // ---- flags and moves ---------------------------------------------------
+
+    @Test
+    fun `un-archiving moves the message back to the inbox`() {
+        server.expect(requestTo("https://graph.microsoft.com/v1.0/me/messages/abc/move"))
+            .andExpect(method(HttpMethod.POST))
+            .andExpect(content().string(org.hamcrest.Matchers.containsString("inbox")))
+            .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON))
+
+        provider.applyFlags(account, "abc", FlagUpdate(isArchived = false))
+
+        server.verify()
+    }
+
+    @Test
+    fun `trashing and un-junking are both moves, to different folders`() {
+        server.expect(requestTo("https://graph.microsoft.com/v1.0/me/messages/abc/move"))
+            .andExpect(content().string(org.hamcrest.Matchers.containsString("deleteditems")))
+            .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON))
+        server.expect(requestTo("https://graph.microsoft.com/v1.0/me/messages/abc/move"))
+            .andExpect(content().string(org.hamcrest.Matchers.containsString("inbox")))
+            .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON))
+
+        provider.applyFlags(account, "abc", FlagUpdate(isTrashed = true))
+        provider.applyFlags(account, "abc", FlagUpdate(isSpam = false))
+
+        server.verify()
+    }
+
+    @Test
+    fun `marking as junk is a move to the junk folder`() {
+        server.expect(requestTo("https://graph.microsoft.com/v1.0/me/messages/abc/move"))
+            .andExpect(content().string(org.hamcrest.Matchers.containsString("junkemail")))
+            .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON))
+
+        provider.applyFlags(account, "abc", FlagUpdate(isSpam = true))
+
+        server.verify()
+    }
+
+    @Test
+    fun `un-starring sets the flag status rather than clearing the field`() {
+        server.expect(requestTo("https://graph.microsoft.com/v1.0/me/messages/abc"))
+            .andExpect(method(HttpMethod.PATCH))
+            .andExpect(content().string(org.hamcrest.Matchers.containsString("notFlagged")))
+            .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON))
+
+        provider.applyFlags(account, "abc", FlagUpdate(isStarred = false))
+
+        server.verify()
+    }
+
+    @Test
+    fun `nothing to change means no request at all`() {
+        provider.applyFlags(account, "abc", FlagUpdate())
+
+        server.verify()
+    }
+
+    // ---- attachments -------------------------------------------------------
+
+    @Test
+    fun `an attachment is standard-base64 decoded, unlike Gmail's url-safe form`() {
+        val content = "spreadsheet bytes"
+        server.expect(
+            requestTo("https://graph.microsoft.com/v1.0/me/messages/m1/attachments/a1"),
+        ).andRespond(
+            withSuccess(
+                """{"contentBytes":"${java.util.Base64.getEncoder().encodeToString(content.toByteArray())}"}""",
+                MediaType.APPLICATION_JSON,
+            ),
+        )
+
+        assertThat(provider.downloadAttachment(account, "m1", "a1")?.decodeToString()).isEqualTo(content)
+    }
+
+    @Test
+    fun `an attachment with no content is null rather than an empty file`() {
+        server.expect(requestTo("https://graph.microsoft.com/v1.0/me/messages/m1/attachments/a1"))
+            .andRespond(withSuccess("""{"name":"empty.txt"}""", MediaType.APPLICATION_JSON))
+
+        assertThat(provider.downloadAttachment(account, "m1", "a1")).isNull()
+    }
+
+    @Test
+    fun `undecodable attachment content is null rather than a crash`() {
+        server.expect(requestTo("https://graph.microsoft.com/v1.0/me/messages/m1/attachments/a1"))
+            .andRespond(withSuccess("""{"contentBytes":"not!valid!base64"}""", MediaType.APPLICATION_JSON))
+
+        assertThat(provider.downloadAttachment(account, "m1", "a1")).isNull()
+    }
+
+    @Test
+    fun `graph reports itself as able to send`() {
+        assertThat(provider.supportsSending).isTrue()
     }
 }

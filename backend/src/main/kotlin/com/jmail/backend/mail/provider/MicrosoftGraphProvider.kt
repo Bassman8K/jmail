@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatusCode
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Component
 import org.springframework.web.client.RestClient
+import java.net.URI
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.Base64
@@ -202,9 +203,13 @@ class MicrosoftGraphProvider(
 
     // ---- transport --------------------------------------------------------
 
+    // `uri(String)` treats its argument as a URI *template* and encodes it, so an already
+    // encoded URL is encoded a second time: `%20` becomes `%2520`, and $orderby and $filter
+    // reach Graph as literal nonsense. It also corrupts the @odata.nextLink Graph hands back
+    // for paging, which must be followed byte for byte. `URI` is passed through untouched.
     private fun get(account: MailAccount, uri: String): JsonNode = execute {
         restClient.get()
-            .uri(uri)
+            .uri(URI.create(uri))
             .header(HttpHeaders.AUTHORIZATION, "Bearer ${tokenService.accessTokenFor(account)}")
             .accept(MediaType.APPLICATION_JSON)
             .retrieve()
@@ -214,7 +219,7 @@ class MicrosoftGraphProvider(
 
     private fun post(account: MailAccount, uri: String, body: Any): JsonNode? = executeOrNull {
         restClient.post()
-            .uri(uri)
+            .uri(URI.create(uri))
             .header(HttpHeaders.AUTHORIZATION, "Bearer ${tokenService.accessTokenFor(account)}")
             .contentType(MediaType.APPLICATION_JSON)
             .body(body)
@@ -225,7 +230,7 @@ class MicrosoftGraphProvider(
 
     private fun patch(account: MailAccount, uri: String, body: Any): JsonNode? = executeOrNull {
         restClient.patch()
-            .uri(uri)
+            .uri(URI.create(uri))
             .header(HttpHeaders.AUTHORIZATION, "Bearer ${tokenService.accessTokenFor(account)}")
             .contentType(MediaType.APPLICATION_JSON)
             .body(body)

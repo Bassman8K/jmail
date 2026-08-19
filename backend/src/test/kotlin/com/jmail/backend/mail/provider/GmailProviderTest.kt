@@ -3,8 +3,10 @@ package com.jmail.backend.mail.provider
 import assertk.assertThat
 import assertk.assertions.contains
 import assertk.assertions.containsExactly
+import assertk.assertions.isEmpty
 import assertk.assertions.isEqualTo
 import assertk.assertions.isFalse
+import assertk.assertions.isNull
 import assertk.assertions.isNotNull
 import assertk.assertions.isTrue
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -262,4 +264,176 @@ class GmailProviderTest {
           }
         }
     """.trimIndent()
+
+    // ---- listing a page ----------------------------------------------------
+
+    private fun expectList(query: String, body: String) {
+        server.expect(requestTo("https://gmail.googleapis.com/gmail/v1/users/me/messages?$query"))
+            .andExpect(method(HttpMethod.GET))
+            .andRespond(withSuccess(body, MediaType.APPLICATION_JSON))
+    }
+
+    private fun expectMessage(id: String, body: String) {
+        server.expect(requestTo("https://gmail.googleapis.com/gmail/v1/users/me/messages/$id?format=full"))
+            .andRespond(withSuccess(body, MediaType.APPLICATION_JSON))
+    }
+
+    private fun simpleMessage(id: String, subject: String) = """
+        {"id":"$id","threadId":"t-$id","labelIds":["INBOX"],
+         "payload":{"mimeType":"text/plain",
+           "headers":[{"name":"Subject","value":"$subject"},
+                      {"name":"From","value":"Grace <grace@example.com>"}],
+           "body":{"data":"${Base64.getUrlEncoder().withoutPadding().encodeToString("Body of $id".toByteArray())}"}}}
+    """.trimIndent()
+
+    @Test
+    fun `a page is listed then fetched message by message`() {
+        // Gmail's list endpoint returns identifiers only, so a page of n messages is n+1
+        // requests. Getting that wrong shows up as an empty mailbox, not as an error.
+        expectList("maxResults=2&labelIds=INBOX", """{"messages":[{"id":"m1"},{"id":"m2"}],"nextPageToken":"page-2"}""")
+        expectMessage("m1", simpleMessage("m1", "First"))
+        expectMessage("m2", simpleMessage("m2", "Second"))
+
+        val page = provider.fetchMessages(account, inboxFolder, limit = 2)
+
+        assertThat(page.messages.map { it.subject }).containsExactly("First", "Second")
+        assertThat(page.nextCursor).isEqualTo("page-2")
+        server.verify()
+    }
+
+    @Test
+    fun `one unreadable message does not stall the whole account`() {
+        // A single message Gmail will not return must not stop the sync: left unhandled it
+        // fails the same page forever and the account never advances.
+        expectList("maxResults=2&labelIds=INBOX", """{"messages":[{"id":"m1"},{"id":"bad"}]}""")
+        expectMessage("m1", simpleMessage("m1", "Readable"))
+        server.expect(requestTo("https://gmail.googleapis.com/gmail/v1/users/me/messages/bad?format=full"))
+            .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR))
+
+        val page = provider.fetchMessages(account, inboxFolder, limit = 2)
+
+        assertThat(page.messages.map { it.subject }).containsExactly("Readable")
+        assertThat(page.nextCursor).isNull()
+    }
+
+    @Test
+    fun `an empty folder returns an empty page rather than failing`() {
+        expectList("maxResults=10&labelIds=INBOX", """{}""")
+
+        val page = provider.fetchMessages(account, inboxFolder, limit = 10)
+
+        assertThat(page.messages).isEmpty()
+        assertThat(page.nextCursor).isNull()
+    }
+
+    @Test
+    fun `a cursor is passed through as Gmail's page token`() {
+        expectList("maxResults=5&labelIds=INBOX&pageToken=abc", """{"messages":[]}""")
+
+        provider.fetchMessages(account, inboxFolder, cursor = "abc", limit = 5)
+
+        server.verify()
+    }
+
+    @Test
+    fun `an incremental sync asks for one second before the high-water mark`() {
+        // Gmail's after: takes whole seconds, so asking from exactly the last timestamp
+        // drops any message that arrived inside the same second.
+        val since = java.time.Instant.ofEpochSecond(1_700_000_000)
+        expectList("maxResults=5&labelIds=INBOX&q=after:1699999999", """{"messages":[]}""")
+
+        provider.fetchMessages(account, inboxFolder, since = since, limit = 5)
+
+        server.verify()
+    }
+
+    // ---- flags -------------------------------------------------------------
+
+    @Test
+    fun `each flag maps to the label Gmail actually uses`() {
+        val captured = mutableListOf<String>()
+        repeat(4) {
+            server.expect(requestTo("https://gmail.googleapis.com/gmail/v1/users/me/messages/abc/modify"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect { request -> captured += request.body.toString() }
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON))
+        }
+
+        provider.applyFlags(account, "abc", FlagUpdate(isRead = false))
+        provider.applyFlags(account, "abc", FlagUpdate(isStarred = true))
+        provider.applyFlags(account, "abc", FlagUpdate(isSpam = true, isTrashed = false))
+        provider.applyFlags(account, "abc", FlagUpdate(isArchived = false))
+
+        // Unread is the *presence* of UNREAD, so marking unread adds rather than removes.
+        assertThat(captured[0]).contains(""""addLabelIds":["UNREAD"]""")
+        assertThat(captured[1]).contains(""""addLabelIds":["STARRED"]""")
+        assertThat(captured[2]).contains("SPAM")
+        assertThat(captured[2]).contains("TRASH")
+        // Un-archiving puts INBOX back.
+        assertThat(captured[3]).contains(""""addLabelIds":["INBOX"]""")
+        server.verify()
+    }
+
+    // ---- attachments -------------------------------------------------------
+
+    @Test
+    fun `an attachment is base64url-decoded`() {
+        val content = "id,total\n1,42\n"
+        server.expect(
+            requestTo("https://gmail.googleapis.com/gmail/v1/users/me/messages/m1/attachments/a1"),
+        ).andRespond(
+            withSuccess(
+                """{"size":${content.length},"data":"${
+                    Base64.getUrlEncoder().withoutPadding().encodeToString(content.toByteArray())
+                }"}""",
+                MediaType.APPLICATION_JSON,
+            ),
+        )
+
+        val bytes = provider.downloadAttachment(account, "m1", "a1")
+
+        assertThat(bytes?.decodeToString()).isEqualTo(content)
+    }
+
+    @Test
+    fun `an attachment Gmail returns without data is null rather than an empty file`() {
+        server.expect(
+            requestTo("https://gmail.googleapis.com/gmail/v1/users/me/messages/m1/attachments/a1"),
+        ).andRespond(withSuccess("""{"size":0}""", MediaType.APPLICATION_JSON))
+
+        assertThat(provider.downloadAttachment(account, "m1", "a1")).isNull()
+    }
+
+    // ---- sending -----------------------------------------------------------
+
+    @Test
+    fun `sending posts the message as base64url-encoded RFC 822`() {
+        var raw: String? = null
+        server.expect(requestTo("https://gmail.googleapis.com/gmail/v1/users/me/messages/send"))
+            .andExpect(method(HttpMethod.POST))
+            .andExpect { request -> raw = request.body.toString() }
+            .andRespond(withSuccess("""{"id":"sent-1","threadId":"t1"}""", MediaType.APPLICATION_JSON))
+
+        val id = provider.sendMessage(
+            account,
+            OutgoingMessage(
+                to = listOf(EmailAddress("someone@example.com")),
+                subject = "Hello",
+                bodyText = "Hi there",
+            ),
+        )
+
+        assertThat(id).isEqualTo("sent-1")
+        val encoded = ObjectMapper().readTree(raw).path("raw").asText()
+        val decoded = Base64.getUrlDecoder().decode(encoded).decodeToString()
+        // Gmail rejects standard base64: + and / are not valid in the raw field.
+        assertThat(encoded.contains('+') || encoded.contains('/')).isFalse()
+        assertThat(decoded).contains("someone@example.com")
+        assertThat(decoded).contains("Hello")
+    }
+
+    @Test
+    fun `gmail reports itself as able to send`() {
+        assertThat(provider.supportsSending).isTrue()
+    }
 }
