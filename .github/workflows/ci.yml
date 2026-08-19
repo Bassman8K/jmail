@@ -178,15 +178,22 @@ jobs:
           sudo -E apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=20
           sudo -E apt-get install -y --no-install-recommends rpm fakeroot
 
+      # jpackage cannot cross-compile: each installer must be built on its own OS, which is
+      # the whole reason this job is a matrix. Linux gets its own step because it is the one
+      # that has to cope with rpmbuild being missing -- and a shell `if` cannot live in the
+      # shared step, since the Windows runner would run it through PowerShell.
       - name: Build the native installer
-        # jpackage cannot cross-compile: each installer must be built on its own OS, which
-        # is the whole reason this job is a matrix.
+        if: matrix.os != 'ubuntu-latest'
+        run: ./gradlew :composeApp:packageDistributionForCurrentOS --stacktrace
+
+      - name: Build the native packages
+        if: matrix.os == 'ubuntu-latest'
         run: |
-          if [ "$RUNNER_OS" = Linux ] && ! command -v rpmbuild >/dev/null 2>&1; then
+          if command -v rpmbuild >/dev/null 2>&1; then
+            ./gradlew :composeApp:packageDistributionForCurrentOS --stacktrace
+          else
             echo "::warning::rpmbuild is unavailable, packaging the .deb only"
             ./gradlew :composeApp:packageDeb --stacktrace
-          else
-            ./gradlew :composeApp:packageDistributionForCurrentOS --stacktrace
           fi
 
       - uses: actions/upload-artifact@v4
