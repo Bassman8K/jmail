@@ -241,12 +241,20 @@ jobs:
         # builds Debug against a separate debug dylib and leaves a preview stub in the
         # bundle instead of a linked executable.
         run: |
-          set -o pipefail
-          xcodebuild -project iosApp/JMail.xcodeproj -scheme JMail \
-            -configuration Release \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath iosApp/build \
-            CODE_SIGNING_ALLOWED=NO build | tail -30
+          if ! xcodebuild -project iosApp/JMail.xcodeproj -scheme JMail \
+              -configuration Release \
+              -destination 'generic/platform=iOS Simulator' \
+              -derivedDataPath iosApp/build \
+              CODE_SIGNING_ALLOWED=NO build > xcodebuild.log 2>&1; then
+            echo "::group::xcodebuild errors"
+            grep -nE "error:|warning: .*framework|BUILD FAILED|The following build commands failed" -A4 xcodebuild.log | tail -80
+            echo "::endgroup::"
+            echo "::group::last 120 lines"
+            tail -120 xcodebuild.log
+            echo "::endgroup::"
+            exit 1
+          fi
+          tail -5 xcodebuild.log
 
       - name: Package the simulator app
         run: |
