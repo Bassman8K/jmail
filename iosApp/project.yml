@@ -19,6 +19,10 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
     ENABLE_USER_SCRIPT_SANDBOXING: NO # the Gradle build phase writes outside the sandbox
+    # Xcode 16 builds Debug against a separate debug dylib and leaves a preview stub in the
+    # bundle rather than a linked executable. That is fine when you are running from Xcode
+    # and useless for anything that packages the .app, so the classic single binary is kept.
+    ENABLE_DEBUG_DYLIB: NO
     MARKETING_VERSION: "1.0.0"
     CURRENT_PROJECT_VERSION: "1"
 

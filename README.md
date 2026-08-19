@@ -40,6 +40,13 @@ land in a seeded inbox of 20 realistic messages already sorted across every cate
 **Requirements:** Docker and Java 17+. Nothing else — the Gradle wrapper fetches its own
 toolchain, and the Android SDK and Xcode are detected automatically if you have them.
 
+Only have Docker? Then run everything in containers, using the backend image published with
+each release, and skip the build entirely:
+
+```bash
+./run.sh docker    # pulls ghcr.io/bassman8k/jmail-backend, serves the app on :3000
+```
+
 ---
 
 ## Downloads
@@ -55,10 +62,18 @@ Every release carries a build for each platform. Grab one from
 | **Windows** | `JMail-1.0.0.exe` | Portable installer |
 | **Linux** | `jmail_1.0.0-1_amd64.deb` | Debian, Ubuntu, Mint |
 | **Linux** | `jmail-1.0.0-1.x86_64.rpm` | Fedora, RHEL, openSUSE |
-| **Android** | `composeApp-release-unsigned.apk` | Sideload directly; unsigned, so allow installs from unknown sources |
-| **Android** | `composeApp-release.aab` | For a Play Store upload |
+| **Android** | `JMail-1.0.0.apk` | Signed, sideload directly |
+| **Android** | `JMail-1.0.0.aab` | For a Play Store upload |
 | **iOS** | `JMail-simulator.zip` | Simulator build — a device build needs your own Apple signing identity |
 | **Web** | `jmail-web-v1.0.0.zip` | The built site, to serve yourself — or just use the hosted build below |
+
+The desktop builds are not code-signed, because signing them needs an Apple Developer
+identity and a Windows code-signing certificate that belong to whoever publishes the app.
+macOS will say the app is from an unidentified developer on first launch (right-click → Open
+once, and it stops asking), and Windows SmartScreen will show a "more info" prompt.
+
+The Android APK **is** signed, with a key held in this repository's Actions secrets, so it
+installs directly and upgrades in place across releases.
 
 **Web:** [bassman8k.github.io/jmail](https://bassman8k.github.io/jmail) — published from
 `main` on every push.
@@ -124,6 +139,7 @@ tonal elevation rather than going pure black.
 
 ```bash
 ./run.sh              # start everything
+./run.sh docker       # start everything in Docker, no Java needed
 ./run.sh desktop      # launch the desktop app
 ./run.sh web          # build and serve the browser app
 ./run.sh test         # every test, plus the coverage gate

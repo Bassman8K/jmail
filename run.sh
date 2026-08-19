@@ -3,6 +3,7 @@
 # JMail — one command to run everything.
 #
 #   ./run.sh              start the whole stack and tell you where to click
+#   ./run.sh docker       run everything in Docker, no Java needed
 #   ./run.sh test         run every test and the coverage gate
 #   ./run.sh desktop      launch the desktop app
 #   ./run.sh web          serve the browser app
@@ -268,6 +269,56 @@ Sign in with ${BOLD}"Explore the demo mailbox"${RESET} — no account or credent
 BANNER
 }
 
+# Runs the whole stack in containers using the backend image published by CI, so a
+# machine with Docker and nothing else can run JMail. `./run.sh` proper builds the backend
+# from source, which is what you want while changing it; this is for trying it out.
+command_docker() {
+  command -v docker >/dev/null 2>&1 || die "Docker is required. Install Docker Desktop, then run this again."
+  docker info >/dev/null 2>&1 || die "Docker is installed but not running. Start Docker Desktop, then run this again."
+  ensure_env_file
+
+  local image="${JMAIL_BACKEND_IMAGE:-ghcr.io/bassman8k/jmail-backend:latest}"
+
+  step "Pulling $image"
+  if ! JMAIL_BACKEND_IMAGE="$image" docker compose -f "$COMPOSE_FILE" --env-file .env \
+      --profile full pull backend 2>&1 | tail -3; then
+    warn "Could not pull the published image; building it from source instead."
+    JMAIL_BACKEND_IMAGE="" docker compose -f "$COMPOSE_FILE" --env-file .env \
+      --profile full up -d --build
+  else
+    step "Starting the stack"
+    # --no-build is what makes Compose use the pulled image: a service declaring both
+    # `image` and `build` is otherwise built and tagged locally, never pulled.
+    JMAIL_BACKEND_IMAGE="$image" docker compose -f "$COMPOSE_FILE" --env-file .env \
+      --profile full up -d --no-build
+  fi
+
+  local backend_port web_port
+  backend_port=$(env_value BACKEND_PORT 8090)
+  web_port=$(env_value WEB_PORT 3000)
+
+  step "Waiting for the API"
+  local waited=0
+  until curl -fsS "http://localhost:${backend_port}/actuator/health" >/dev/null 2>&1; do
+    sleep 2; waited=$((waited + 2))
+    [[ $waited -lt 120 ]] || die "The backend did not become healthy within 120s. See: docker compose -f $COMPOSE_FILE logs backend"
+  done
+
+  cat <<BANNER
+
+${BOLD}JMail is running, entirely in Docker.${RESET}
+
+  ${BOLD}Web app${RESET}        http://localhost:${web_port}
+  ${BOLD}API${RESET}            http://localhost:${backend_port}
+  ${BOLD}API docs${RESET}       http://localhost:${backend_port}/docs
+
+Sign in with ${BOLD}"Explore the demo mailbox"${RESET} — no account or credentials needed.
+
+  ${DIM}./run.sh down    stop everything${RESET}
+
+BANNER
+}
+
 command_desktop() {
   require_prerequisites
   ensure_env_file
@@ -406,11 +457,14 @@ command_reset() {
 }
 
 usage() {
-  sed -n '3,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  # The header comment block is the help text, so adding a command in one place keeps
+  # `--help` correct. Read to the first non-comment line rather than a fixed range.
+  sed -n '2,/^[^#]/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
 }
 
 case "${1:-up}" in
   up|start|"")  command_up ;;
+  docker)       command_docker ;;
   desktop|app)  command_desktop ;;
   web|browser)  command_web ;;
   test|check)   command_test ;;

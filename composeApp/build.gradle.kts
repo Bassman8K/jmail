@@ -61,6 +61,12 @@ if (androidEnabled) {
                     storePassword = System.getenv("JMAIL_ANDROID_KEYSTORE_PASSWORD")
                     keyAlias = System.getenv("JMAIL_ANDROID_KEY_ALIAS")
                     keyPassword = System.getenv("JMAIL_ANDROID_KEY_PASSWORD")
+
+                    // minSdk 26 means the legacy JAR signature is dead weight; v3 is what
+                    // lets the signing key be rotated later without orphaning installs.
+                    enableV1Signing = false
+                    enableV2Signing = true
+                    enableV3Signing = true
                 }
             }
         }
@@ -317,6 +323,40 @@ val generateAppIcons by tasks.registering {
             JMailIconRenderer.ico(listOf(16, 32, 64, 128, 256).associateWith { pngBySize.getValue(it) }),
         )
         logger.lifecycle("Generated app icons in ${dir.absolutePath}")
+    }
+}
+
+/**
+ * Copies the Android build output to the names the release page uses.
+ *
+ * AGP names its artifacts after the Gradle module — `composeApp-release.apk` — which tells a
+ * person downloading it nothing. Every other platform ships `JMail-<version>.<ext>`, so the
+ * mobile builds are renamed to match rather than left as an inconsistency on the release page.
+ */
+if (androidEnabled) {
+    tasks.register<Copy>("packageAndroidArtifacts") {
+        group = "distribution"
+        description = "Copies the release APK and AAB to build/outputs/jmail under their public names."
+
+        dependsOn("assembleRelease", "bundleRelease")
+
+        from(layout.buildDirectory.file("outputs/apk/release/composeApp-release.apk")) {
+            rename { "JMail-$appVersion.apk" }
+        }
+        from(layout.buildDirectory.file("outputs/bundle/release/composeApp-release.aab")) {
+            rename { "JMail-$appVersion.aab" }
+        }
+        into(layout.buildDirectory.dir("outputs/jmail"))
+
+        // Nothing to copy is a packaging failure, not an empty success — an unsigned build
+        // produces `composeApp-release-unsigned.apk`, which would silently match nothing.
+        doLast {
+            val produced = layout.buildDirectory.dir("outputs/jmail").get().asFile
+                .listFiles().orEmpty().map { it.name }.sorted()
+            check(produced == listOf("JMail-$appVersion.aab", "JMail-$appVersion.apk")) {
+                "Expected a signed APK and an AAB, found $produced"
+            }
+        }
     }
 }
 

@@ -222,26 +222,55 @@ jobs:
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Restore the signing keystore
+        # Android refuses to install an unsigned APK, so a release build has to be signed.
+        # The keystore is held as a base64 secret because Actions secrets are text; it is
+        # written outside the workspace so it can never be picked up by an upload step.
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::warning::no signing keystore configured, the APK will be unsigned"
+            exit 0
+          fi
+          install -d -m 700 "$RUNNER_TEMP/signing"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/signing/release.keystore"
+          chmod 600 "$RUNNER_TEMP/signing/release.keystore"
+          echo "path=$RUNNER_TEMP/signing/release.keystore" >> "$GITHUB_OUTPUT"
+
       - name: Build the APK and app bundle
         # The Android target switches itself on when an SDK is present; the runner has one,
         # so it is enabled explicitly rather than relying on detection.
         run: |
-          ./gradlew :composeApp:assembleRelease :composeApp:bundleRelease \
+          ./gradlew :composeApp:packageAndroidArtifacts \
             -Pjmail.android.enabled=true --stacktrace
         env:
           # Unsigned unless a keystore is provided through repository secrets.
-          JMAIL_ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_PATH }}
+          JMAIL_ANDROID_KEYSTORE: ${{ steps.keystore.outputs.path }}
           JMAIL_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           JMAIL_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           JMAIL_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
+      - name: Check the APK really is signed
+        # A silently unsigned APK is the failure this whole job exists to avoid: it uploads
+        # cleanly and only fails on the user's phone.
+        run: |
+          apk=composeApp/build/outputs/jmail/JMail-1.0.0.apk
+          "$ANDROID_HOME"/build-tools/*/apksigner verify --verbose --print-certs "$apk"
+          # `verify` alone exits 0 on an unsigned APK in some tool versions.
+          "$ANDROID_HOME"/build-tools/*/apksigner verify "$apk" \
+            || { echo "::error::the APK is not signed"; exit 1; }
+
+      - name: Delete the keystore
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/signing"
+
       - uses: actions/upload-artifact@v4
         with:
           name: jmail-android
-          path: |
-            composeApp/build/outputs/apk/release/*.apk
-            composeApp/build/outputs/bundle/release/*.aab
-          if-no-files-found: warn
+          path: composeApp/build/outputs/jmail/*
+          if-no-files-found: error
           retention-days: 30
 
   build-ios:
@@ -272,13 +301,13 @@ jobs:
         # a public repository. This proves the app compiles and links for iOS; producing a
         # device build is a signing step, not a code change.
         #
-        # `pipefail` matters: piping xcodebuild into `tail` otherwise reports tail's exit
-        # code, so a failing build looked green. Release rather than Debug because Xcode 16
-        # builds Debug against a separate debug dylib and leaves a preview stub in the
-        # bundle instead of a linked executable.
+        # Debug, matching the framework linked in the previous step: linking the Kotlin
+        # framework in Release crashed clang with `Bus error: 10` on the 7 GB arm64 runner,
+        # and Debug is a fraction of the memory and time. `ENABLE_DEBUG_DYLIB=NO` in
+        # project.yml is what keeps Debug producing a real executable rather than a stub.
         run: |
           if ! xcodebuild -project iosApp/JMail.xcodeproj -scheme JMail \
-              -configuration Release \
+              -configuration Debug \
               -destination 'generic/platform=iOS Simulator' \
               -derivedDataPath iosApp/build \
               CODE_SIGNING_ALLOWED=NO build > xcodebuild.log 2>&1; then
@@ -294,7 +323,7 @@ jobs:
 
       - name: Package the simulator app
         run: |
-          app=iosApp/build/Build/Products/Release-iphonesimulator/JMail.app
+          app=iosApp/build/Build/Products/Debug-iphonesimulator/JMail.app
           # A bundle with no executable is the failure this step used to hide.
           if [ ! -x "$app/JMail" ]; then
             echo "::error::no linked executable in $app"
@@ -398,16 +427,46 @@ jobs:
   build-backend-image:
     name: Backend image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
+
+      # Every push builds the image; only main and version tags publish it, so a pull
+      # request from a fork can never write to the registry.
+      - name: Sign in to GitHub Container Registry
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Work out the tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/jmail-backend
+          # `edge` tracks main; a version tag also moves `latest`, which is what
+          # docker/compose.yml pulls by default.
+          tags: |
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha,enable=${{ github.event_name == 'pull_request' }}
 
       - name: Build the backend image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/backend.Dockerfile
-          push: false
-          tags: jmail-backend:${{ github.sha }}
+          push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+          # linux/arm64 as well, so an Apple Silicon machine does not emulate the backend.
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

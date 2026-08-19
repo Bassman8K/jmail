@@ -72,6 +72,10 @@ services:
 
   backend:
     profiles: ["full"]
+    # When a service declares both `image` and `build`, Compose builds and tags — it does
+    # not pull. So this names the locally built image, and `./run.sh docker` overrides
+    # JMAIL_BACKEND_IMAGE with the published one and passes --no-build to use it as-is.
+    image: ${JMAIL_BACKEND_IMAGE:-jmail-backend:local}
     build:
       context: ..
       dockerfile: docker/backend.Dockerfile
